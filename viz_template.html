@@ -15,6 +15,10 @@
     --s-cautious: #0E8C74;
     --s-mixed:    #5A4FCF;
     --critical:   #D03B3B;
+    /* darker steps of the same two hues, for legs, faces and horns -- shading
+       only, never used to encode a value */
+    --s-greedy-dk:   #8E3A12;
+    --s-cautious-dk: #0A6354;
     --g0: #E7F4E7; --g1: #C2E2C2; --g2: #9DCE9E; --g3: #7DB97E;
     --g4: #61A364; --g5: #478D4B; --g6: #37753B;
 
@@ -38,6 +42,8 @@
       --s-cautious: #16A88C;
       --s-mixed:    #8A7CF0;
       --critical:   #E06060;
+      --s-greedy-dk:   #A94E22;
+      --s-cautious-dk: #0E7A66;
       --g0: #1B231B; --g1: #233923; --g2: #2C502D; --g3: #366839;
       --g4: #448047; --g5: #549957; --g6: #66B26A;
     }
@@ -57,6 +63,8 @@
     --s-cautious: #16A88C;
     --s-mixed:    #8A7CF0;
     --critical:   #E06060;
+    --s-greedy-dk:   #A94E22;
+    --s-cautious-dk: #0E7A66;
     --g0: #1B231B; --g1: #233923; --g2: #2C502D; --g3: #366839;
     --g4: #448047; --g5: #549957; --g6: #66B26A;
   }
@@ -486,7 +494,7 @@
 
   <section class="stage">
     <div class="panel">
-      <div class="panel-title">Pasture — seed <span id="seed-lbl"></span></div>
+      <div class="panel-title">Pasture · <span id="map-caption"></span></div>
       <svg id="grid" viewBox="0 0 360 360" role="img"
            aria-label="Pasture map. Each cell shows tufts of grass; fewer tufts means less resource left. Horned animals are greedy foragers, woolly ones are cautious."></svg>
 
@@ -494,8 +502,8 @@
         <span class="key-item"><svg class="key-ico" viewBox="0 0 34 20" aria-hidden="true" data-key="grass-full"></svg>full cell</span>
         <span class="key-item"><svg class="key-ico" viewBox="0 0 34 20" aria-hidden="true" data-key="grass-half"></svg>half</span>
         <span class="key-item"><svg class="key-ico" viewBox="0 0 34 20" aria-hidden="true" data-key="grass-bare"></svg>stripped</span>
-        <span class="key-item"><svg class="key-ico" viewBox="0 0 42 26" aria-hidden="true" data-key="greedy"></svg>greedy (horned)</span>
-        <span class="key-item"><svg class="key-ico" viewBox="0 0 42 26" aria-hidden="true" data-key="cautious"></svg>cautious (woolly)</span>
+        <span class="key-item"><svg class="key-ico" viewBox="0 0 46 34" aria-hidden="true" data-key="greedy"></svg>greedy (horned)</span>
+        <span class="key-item"><svg class="key-ico" viewBox="0 0 46 34" aria-hidden="true" data-key="cautious"></svg>cautious (woolly)</span>
       </div>
 
       <div class="stock-wrap">
@@ -611,21 +619,31 @@
   const state = { rule: "global", r: String(D.rValues[2]), mix: "mixed", tick: 0, playing: false, speed: 1 };
 
   /* ── controls ───────────────────────────────────────── */
+  /* `state` is the single source of truth. Chips never carry selection on their
+     own -- syncChips() re-derives every group's aria-pressed from state on each
+     render, so a control can never end up displaying something other than what
+     is actually on screen. */
+  const chipGroups = [];
+
   function buildChips(host, items, key, onPick) {
     host.innerHTML = "";
+    chipGroups.push({ host, key });
     items.forEach(({ value, label }) => {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "chip";
       b.textContent = label;
-      b.setAttribute("aria-pressed", String(state[key] === value));
-      b.addEventListener("click", () => {
-        state[key] = value;
-        [...host.children].forEach((c) => c.setAttribute("aria-pressed", "false"));
-        b.setAttribute("aria-pressed", "true");
-        onPick();
-      });
+      b.dataset.value = value;
+      b.addEventListener("click", () => { state[key] = value; syncChips(); onPick(); });
       host.appendChild(b);
+    });
+    syncChips();
+  }
+
+  function syncChips() {
+    chipGroups.forEach(({ host, key }) => {
+      [...host.children].forEach((c) =>
+        c.setAttribute("aria-pressed", String(String(c.dataset.value) === String(state[key]))));
     });
   }
 
@@ -649,8 +667,21 @@
   }
 
   const runCache = {};
+  const runKey = () => state.rule + "|" + state.r + "|" + state.mix;
+
   function currentRun() {
-    const k = state.rule + "|" + state.r + "|" + state.mix;
+    let k = runKey();
+    if (!D.runs[k]) {
+      // Rather than throw on a key that doesn't exist, snap each field back to a
+      // legal value and resync the controls, so a bad selection self-corrects
+      // instead of leaving a blank map.
+      console.warn("commons-viz: no recorded run for " + k + " — snapping to a valid selection");
+      if (!D.rules.includes(state.rule)) state.rule = D.rules[0];
+      if (!D.rValues.map(String).includes(state.r)) state.r = String(D.rValues[0]);
+      if (!D.mixes.some((m) => m.key === state.mix)) state.mix = D.mixes[0].key;
+      k = runKey();
+      syncChips();
+    }
     if (!runCache[k]) {
       const raw = D.runs[k];
       runCache[k] = { ...raw, grids: raw.frames.map(decodeFrame) };
@@ -705,32 +736,46 @@
 
   /* Kind is carried by silhouette as well as colour -- greedy animals are
      horned, cautious ones are woolly -- so the two never rely on hue alone. */
+  /* Greedy foragers are goats -- barrel body, swept-back horns, beard. Cautious
+     ones are sheep -- a cloud of fleece and a dark face. The pair differ in
+     silhouette, not just hue, so they stay distinguishable in greyscale, at
+     cell size, and for a colourblind reader. */
   function forager(kind, facing, parent) {
     const col = cssv(kind === "greedy" ? "--s-greedy" : "--s-cautious");
+    const dk = cssv(kind === "greedy" ? "--s-greedy-dk" : "--s-cautious-dk");
     const ring = cssv("--panel");
     const g = mk("g", { transform: `scale(${facing < 0 ? -1 : 1} 1)` }, parent);
-    mk("ellipse", { cx: 0, cy: 12, rx: 12, ry: 2.4, fill: cssv("--ink"), opacity: 0.14 }, g);
-    [-7, -3, 3, 7].forEach((x) =>
-      mk("line", { x1: x, y1: 2, x2: x, y2: 11.5, stroke: col, "stroke-width": 2.2, "stroke-linecap": "round" }, g));
-    mk("path", { d: "M-10.5 -3 q -4.5 -1.5 -5.5 -6", fill: "none", stroke: col, "stroke-width": 2, "stroke-linecap": "round" }, g);
-    if (kind === "cautious") {
-      mk("path", {
-        d: "M-11 1 a 4.3 4.3 0 0 1 4.6 -5 a 4.3 4.3 0 0 1 6 -0.8 a 4.3 4.3 0 0 1 5.9 1.6 l 0 5.4 a 5 5 0 0 1 -5 3.6 l -6.5 0 a 5 5 0 0 1 -5 -3.6 z",
-        fill: col, stroke: ring, "stroke-width": 1.5, "stroke-linejoin": "round",
-      }, g);
-    } else {
-      mk("ellipse", { cx: 0, cy: 0, rx: 11, ry: 7, fill: col, stroke: ring, "stroke-width": 1.5 }, g);
-    }
-    mk("circle", { cx: 11.5, cy: -4.5, r: 4.8, fill: col, stroke: ring, "stroke-width": 1.5 }, g);
+
+    mk("ellipse", { cx: 0, cy: 12.4, rx: 12.5, ry: 2.3, fill: cssv("--ink"), opacity: 0.15 }, g);
+
+    // far pair of legs sits back at lower opacity, so the stance reads as depth
+    [[-7.5, 0.55, -0.6], [6.5, 0.55, -0.6], [-3.5, 1, 0.4], [3, 1, 0.4]].forEach(([x, o, dx]) =>
+      mk("line", { x1: x, y1: 1, x2: x + dx, y2: 11.6, stroke: dk, "stroke-width": 2.6, "stroke-linecap": "round", opacity: o }, g));
+
     if (kind === "greedy") {
-      // horns sweep back over the neck, the way a goat's do -- forward-curling
-      // ones read as antennae at this size
-      mk("path", { d: "M12.8 -8.6 q -0.8 -5.4 -5.6 -6.2", fill: "none", stroke: col, "stroke-width": 2, "stroke-linecap": "round" }, g);
-      mk("path", { d: "M10.2 -8 q -1.4 -4.4 -5.4 -5", fill: "none", stroke: col, "stroke-width": 2, "stroke-linecap": "round" }, g);
+      mk("path", {
+        d: "M-12 -1 C -12 -7 -7 -9.4 -1 -9.1 C 5 -8.8 9.6 -6.9 11 -4 L 11 0.2 C 10.4 4 6 5.7 0 5.7 L -6 5.7 C -10 5.7 -12 3.6 -12 -1 Z",
+        fill: col,
+      }, g);
+      mk("line", { x1: 8, y1: -5.5, x2: 14.5, y2: -10, stroke: col, "stroke-width": 7.4, "stroke-linecap": "round" }, g);
+      mk("ellipse", { cx: 17.4, cy: -11, rx: 6, ry: 4.2, fill: col, transform: "rotate(-18 17.4 -11)" }, g);
+      mk("ellipse", { cx: 22.2, cy: -9.4, rx: 2.9, ry: 2.4, fill: dk, transform: "rotate(-18 22.2 -9.4)" }, g);
+      mk("path", { d: "M15.2 -14.6 q 1.2 -5.8 -3.8 -7.6", fill: "none", stroke: dk, "stroke-width": 2.7, "stroke-linecap": "round" }, g);
+      mk("path", { d: "M12.6 -13.9 q 0.6 -5 -3.8 -6.6", fill: "none", stroke: dk, "stroke-width": 2.2, "stroke-linecap": "round", opacity: 0.55 }, g);
+      mk("path", { d: "M13.4 -11.6 q -4.2 -1.5 -6.2 0.5", fill: "none", stroke: col, "stroke-width": 3, "stroke-linecap": "round" }, g);
+      mk("path", { d: "M20.4 -7.2 q -0.4 3.6 -2.6 5", fill: "none", stroke: dk, "stroke-width": 2, "stroke-linecap": "round" }, g);
+      mk("circle", { cx: 19, cy: -11.8, r: 1.15, fill: ring }, g);
     } else {
-      mk("path", { d: "M9.8 -7.4 q -3.6 -1.6 -5.2 0.6", fill: "none", stroke: col, "stroke-width": 1.9, "stroke-linecap": "round" }, g);
+      mk("ellipse", { cx: -0.5, cy: -1, rx: 11.6, ry: 7, fill: col }, g);
+      [[-8.2, -5.4, 4.2], [-3.4, -7.4, 4.8], [1.8, -7.6, 4.8], [6.6, -5.6, 4.2], [-10, 2.4, 3.6], [8.4, 1.8, 3.6]]
+        .forEach(([cx, cy, r]) => mk("circle", { cx, cy, r, fill: col }, g));
+      mk("line", { x1: 8, y1: -4.5, x2: 13, y2: -7.5, stroke: dk, "stroke-width": 6.2, "stroke-linecap": "round" }, g);
+      mk("ellipse", { cx: 16, cy: -8.4, rx: 5, ry: 4.1, fill: dk, transform: "rotate(-14 16 -8.4)" }, g);
+      mk("ellipse", { cx: 20, cy: -6.9, rx: 2.5, ry: 2.1, fill: dk, transform: "rotate(-14 20 -6.9)" }, g);
+      mk("path", { d: "M12.6 -9.6 q -4.8 -0.4 -5.6 3.4", fill: "none", stroke: dk, "stroke-width": 2.9, "stroke-linecap": "round" }, g);
+      mk("circle", { cx: 12.6, cy: -11.4, r: 3.1, fill: col }, g);
+      mk("circle", { cx: 17.6, cy: -9.4, r: 1.05, fill: ring }, g);
     }
-    mk("circle", { cx: 13.4, cy: -5, r: 1.15, fill: ring }, g);
     return g;
   }
 
@@ -818,7 +863,8 @@
       const cy = cellCy(y0) + (cellCy(y1) - cellCy(y0)) * k;
       // a small hop through the move sells it as walking rather than teleporting
       const hop = REDUCED ? 0 : -Math.sin(Math.PI * k) * 5;
-      node.holder.setAttribute("transform", `translate(${cx} ${cy + hop})`);
+      // 0.82 keeps the animal inside its cell with grass still visible around it
+      node.holder.setAttribute("transform", `translate(${cx} ${cy + hop}) scale(0.82)`);
     });
   }
 
@@ -893,7 +939,7 @@
           for (let i = 0; i < n; i++) tuft(8 + i * 6.5, 16, 0.8, cssv("--g6"), svg);
         }
       } else {
-        forager(k, 1, mk("g", { transform: "translate(19 14) scale(0.92)" }, svg));
+        forager(k, 1, mk("g", { transform: "translate(17 22) scale(0.8)" }, svg));
       }
     });
   }
@@ -930,7 +976,15 @@
     document.getElementById("verdict").innerHTML = collapsed
       ? `<span class="status-chip dead">▲ Collapsed at tick ${run.survived}</span>`
       : `<span class="status-chip alive">● Survived all ${D.ticks} ticks</span>`;
-    document.getElementById("seed-lbl").textContent = D.replaySeed;
+  }
+
+  /* The map names its own configuration, so what is on screen is always
+     self-describing -- a screenshot carries its settings with it, and a control
+     that disagrees with the render is visible instead of silent. */
+  function drawCaption() {
+    const mix = D.mixes.find((m) => m.key === state.mix);
+    document.getElementById("map-caption").textContent =
+      `${RULE_LABEL[state.rule]} · r ${state.r} · ${mix.label} · seed ${D.replaySeed}`;
   }
 
   const scrub = document.getElementById("scrub");
@@ -947,10 +1001,12 @@
   let lastTick = null;
 
   function render() {
+    syncChips();
     syncScrub();
     drawGrid(lastTick);
     drawReadout();
     drawStockline();
+    drawCaption();
     lastTick = state.tick;
   }
 
