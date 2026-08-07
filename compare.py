@@ -89,9 +89,11 @@ class Agent:
         """Move one step toward resource, harvest, and mutate the grid in place.
 
         Movement is a greedy hill-climb: consider staying put plus the four
-        orthogonal neighbours, and move to whichever holds the most. Ties go to
-        whichever candidate was checked first (stay, right, left, down, up), so
-        movement is fully deterministic -- no randomness anywhere.
+        orthogonal neighbours, and move to whichever holds the most. Ties are
+        broken uniformly at random via self.rng, which matters because ties are
+        the common case, not an edge case -- the grid starts uniformly full, so
+        on early ticks every candidate cell is identical and the move is a free
+        choice among all of them.
 
         Harvest policy depends on kind:
           'greedy'   -- take up to TAKE, no matter how little is left. Will
@@ -102,13 +104,16 @@ class Agent:
                         (Unused: the sweep below only builds greedy/cautious
                         agents, so this branch never runs.)
         """
-        best = None
+        best_val, best = None, []
         for dy, dx in [(0, 0), (0, 1), (0, -1), (1, 0), (-1, 0)]:
             ny, nx = self.y+dy, self.x+dx
             if 0 <= ny < N and 0 <= nx < N:          # stay on the grid
-                if best is None or g[ny, nx] > g[best[0], best[1]]:
-                    best = (ny, nx)
-        self.y, self.x = best
+                val = g[ny, nx]
+                if best_val is None or val > best_val:
+                    best_val, best = val, [(ny, nx)]
+                elif val == best_val:
+                    best.append((ny, nx))
+        self.y, self.x = best[self.rng.integers(len(best))]
         cell = g[self.y, self.x]
         if self.kind == 'greedy':
             take = min(cell, TAKE)
@@ -132,11 +137,17 @@ def run(rule, r, mix, seed):
     below 5% of capacity, at which point the run stops early. So survived <
     TICKS is the signature of a collapse.
 
-    `seed` builds an RNG that is handed to each agent -- but nothing in Agent
-    ever draws from it, and neither movement nor harvesting is stochastic.
-    Every run with the same (rule, r, mix) is therefore byte-identical
-    regardless of seed, and averaging over seeds below averages copies of the
-    same run rather than sampling a distribution.
+    `seed` drives two sources of randomness, so runs genuinely differ and
+    averaging over seeds samples a distribution: agents break movement ties at
+    random, and the order in which agents act is reshuffled every tick.
+
+    Shuffling the activation order is not cosmetic. Agents share cells, and
+    whoever acts first harvests before the others see the cell, so acting
+    early is a real advantage. With a fixed order that advantage always went
+    to the same agents -- and since the mixed group is spelled
+    ['greedy','greedy','cautious','cautious'], it always went to the two
+    greedy ones, inflating the very greedy-vs-cautious gap this script exists
+    to measure.
     """
     rng = np.random.default_rng(seed)
     g = np.full((N, N), CAP)
@@ -144,8 +155,8 @@ def run(rule, r, mix, seed):
     ags = [Agent(k, sx, sy, rng) for k, (sx, sy) in zip(mix, starts)]
     survived = TICKS
     for t in range(TICKS):
-        for a in ags:
-            a.act(g)
+        for i in rng.permutation(len(ags)):
+            ags[i].act(g)
         g = regrow(g, rule, r)
         if g.sum() < 0.05*N*N and survived == TICKS:
             survived = t
