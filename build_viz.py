@@ -1,7 +1,7 @@
 """
 Build the standalone visualiser page.
 
-Injects viz_data.json into viz_template.html and writes commons_viz.html, which
+Injects viz_data.json into viz_template.html and writes overgraze.html, which
 is fully self-contained -- no external scripts, fonts, or data fetches, so it
 opens offline and satisfies the artifact CSP.
 
@@ -27,6 +27,6 @@ if TOKEN not in template:
 # the slash harmlessly and the browser still parses it.
 data = data.replace("</", "<\\/")
 
-out = HERE / "commons_viz.html"
+out = HERE / "overgraze.html"
 out.write_text(template.replace(TOKEN, data), encoding="utf-8")
 print(f"wrote {out.name}: {out.stat().st_size/1024:.0f} KB")

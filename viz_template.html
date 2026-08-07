@@ -1,4 +1,4 @@
-<title>The Commons, Tick by Tick</title>
+<title>Overgraze — the commons, tick by tick</title>
 
 <style>
   :root {
@@ -108,6 +108,26 @@
     line-height: 1.08;
     letter-spacing: -0.015em;
     margin: 0;
+    text-wrap: balance;
+  }
+
+  .titleblock { display: flex; align-items: center; gap: 13px; }
+
+  /* Two intact blades and one bitten stub -- the name drawn as the thing it
+     names, in the same vocabulary the map uses. */
+  .mark { width: clamp(32px, 5vw, 44px); height: auto; flex: none; }
+  .mark path { fill: none; stroke-width: 2.5; stroke-linecap: round; }
+  .mark .blade { stroke: var(--g6); }
+  .mark .bitten { stroke: var(--s-greedy); }
+
+  .dek {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: clamp(17px, 2.1vw, 20px);
+    line-height: 1.35;
+    color: var(--ink-2);
+    margin: 0;
+    max-width: 54ch;
     text-wrap: balance;
   }
 
@@ -467,7 +487,15 @@
 
   <header class="masthead">
     <div class="eyebrow">Agent-based simulation · 6×6 grid · 4 foragers · 100 ticks</div>
-    <h1>The commons, tick by tick</h1>
+    <div class="titleblock">
+      <svg class="mark" viewBox="0 0 26 26" aria-hidden="true">
+        <path class="blade"  d="M13 23 C 11.8 16 8.6 12.4 5.8 9.8" />
+        <path class="bitten" d="M13 23 C 13.4 19.6 13.5 18 13.2 16.6" />
+        <path class="blade"  d="M13 23 C 14.8 16.6 17.8 13.4 20.6 11.2" />
+      </svg>
+      <h1>Overgraze</h1>
+    </div>
+    <p class="dek">The commons, tick by tick — when restraint pays, and when it doesn’t.</p>
     <p class="standfirst">
       Four foragers share a grid of renewable cells. Each tick they move to the richest
       cell in reach and harvest it; then the grid regrows. Greedy foragers strip a cell
@@ -597,6 +625,11 @@
     <div>
       Summary statistics average 40 seeds; the map plays back seed 0. Movement ties and
       per-tick activation order are the two random draws.
+    </div>
+    <div>
+      <strong>Overgraze</strong> — foragers act sequentially within a tick rather than
+      submitting simultaneous intents, and no single regrowth rate is designated as the
+      default. Both are deliberate; see the README for what they cost.
     </div>
   </footer>
 </div>

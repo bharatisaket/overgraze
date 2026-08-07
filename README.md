@@ -39,9 +39,9 @@ and counts dead vs recovered cells after an all-greedy run.
 | `payoff.py` | Per-agent payoffs and dead-zone analysis. Imports `run`, `N`, `CAP`, `R_VALUES`. |
 | `export_viz.py` | Replays `compare.run()` recording every tick → `viz_data.json`. |
 | `viz_template.html` | The visualiser page, with a `/*__VIZ_DATA__*/` placeholder. |
-| `build_viz.py` | Injects the data into the template → self-contained `commons_viz.html`. |
+| `build_viz.py` | Injects the data into the template → self-contained `overgraze.html`. |
 
-`viz_data.json` and `commons_viz.html` are build outputs and are gitignored.
+`viz_data.json` and `overgraze.html` are build outputs and are gitignored.
 
 ## The model
 
@@ -116,7 +116,7 @@ have recovered above 0.5 under either rule.
 python export_viz.py && python build_viz.py
 ```
 
-Produces `commons_viz.html`, a self-contained page (no external scripts, fonts,
+Produces `overgraze.html`, a self-contained page (no external scripts, fonts,
 or fetches) with a grid player, sweep charts with per-seed error bars, and a
 table of every number. The map draws each cell's resource as tufts of grass that
 get eaten one by one, with greedy foragers as goats and cautious ones as sheep —
