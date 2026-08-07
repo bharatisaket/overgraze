@@ -2,3 +2,8 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# Build outputs -- regenerate with:
+#   python export_viz.py && python build_viz.py
+viz_data.json
+commons_viz.html

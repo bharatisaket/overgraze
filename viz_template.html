@@ -1,0 +1,975 @@
+<title>The Commons, Tick by Tick</title>
+
+<style>
+  :root {
+    color-scheme: light;
+    --plane:      #F2F2EA;
+    --panel:      #FBFAF5;
+    --panel-2:    #F5F4EC;
+    --ink:        #131711;
+    --ink-2:      #5A5F52;
+    --muted:      #8A8F80;
+    --rule:       #DFDFD2;
+    --hair:       #E8E7DC;
+    --s-greedy:   #C4531F;
+    --s-cautious: #0E8C74;
+    --s-mixed:    #5A4FCF;
+    --critical:   #D03B3B;
+    --g0: #E7F4E7; --g1: #C2E2C2; --g2: #9DCE9E; --g3: #7DB97E;
+    --g4: #61A364; --g5: #478D4B; --g6: #37753B;
+
+    --serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "Consolas", "SF Mono", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --plane:      #0D100E;
+      --panel:      #191E1B;
+      --panel-2:    #212721;
+      --ink:        #F2F5EE;
+      --ink-2:      #B4BCAB;
+      --muted:      #8A9384;
+      --rule:       #2C332C;
+      --hair:       #262C26;
+      --s-greedy:   #E0703A;
+      --s-cautious: #16A88C;
+      --s-mixed:    #8A7CF0;
+      --critical:   #E06060;
+      --g0: #1B231B; --g1: #233923; --g2: #2C502D; --g3: #366839;
+      --g4: #448047; --g5: #549957; --g6: #66B26A;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane:      #0D100E;
+    --panel:      #191E1B;
+    --panel-2:    #212721;
+    --ink:        #F2F5EE;
+    --ink-2:      #B4BCAB;
+    --muted:      #8A9384;
+    --rule:       #2C332C;
+    --hair:       #262C26;
+    --s-greedy:   #E0703A;
+    --s-cautious: #16A88C;
+    --s-mixed:    #8A7CF0;
+    --critical:   #E06060;
+    --g0: #1B231B; --g1: #233923; --g2: #2C502D; --g3: #366839;
+    --g4: #448047; --g5: #549957; --g6: #66B26A;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--plane);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 40px 24px 72px;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  /* ── masthead ─────────────────────────────────────────── */
+  .masthead { display: flex; flex-direction: column; gap: 14px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(30px, 5vw, 46px);
+    line-height: 1.08;
+    letter-spacing: -0.015em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--ink-2);
+    max-width: 62ch;
+    margin: 0;
+  }
+
+  h2 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 23px;
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .section-note {
+    font-size: 14px;
+    color: var(--ink-2);
+    max-width: 68ch;
+    margin: 0;
+  }
+
+  section { display: flex; flex-direction: column; gap: 18px; }
+
+  .sec-head { display: flex; flex-direction: column; gap: 6px; }
+
+  /* ── controls ─────────────────────────────────────────── */
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 22px;
+    padding: 16px 18px;
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+  }
+
+  .ctl { display: flex; flex-direction: column; gap: 7px; }
+
+  .ctl-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  .chip {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 5px 11px;
+    background: transparent;
+    color: var(--ink-2);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+
+  .chip:hover { background: var(--panel-2); color: var(--ink); }
+
+  .chip[aria-pressed="true"] {
+    background: var(--ink);
+    color: var(--panel);
+    border-color: var(--ink);
+  }
+
+  .chip:focus-visible,
+  .transport button:focus-visible,
+  input[type="range"]:focus-visible {
+    outline: 2px solid var(--s-mixed);
+    outline-offset: 2px;
+  }
+
+  /* ── stage: grid + readout ────────────────────────────── */
+  .stage {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+
+  @media (max-width: 760px) {
+    .stage { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .panel-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  #grid { width: 100%; height: auto; display: block; }
+
+  .transport { display: flex; align-items: center; gap: 10px; }
+
+  .transport button {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 6px 12px;
+    min-width: 62px;
+    background: var(--panel-2);
+    color: var(--ink);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+
+  .transport button:hover { border-color: var(--muted); }
+
+  input[type="range"] { flex: 1; min-width: 60px; accent-color: var(--s-cautious); }
+
+  .tickread {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* ── readout ──────────────────────────────────────────── */
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--hair);
+  }
+
+  .stat-row:last-child { border-bottom: none; }
+
+  .stat-key { font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; }
+
+  .stat-val {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+
+  .swatch {
+    width: 9px; height: 9px;
+    border-radius: 2px;
+    flex: none;
+    display: inline-block;
+  }
+
+  .stock-bar {
+    height: 6px;
+    background: var(--panel-2);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid var(--hair);
+  }
+
+  .stock-fill { height: 100%; background: var(--g5); transition: width 0.1s linear; }
+
+  .status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 9px;
+    border-radius: 3px;
+    border: 1px solid;
+  }
+
+  .status-chip.alive { color: var(--s-cautious); border-color: var(--s-cautious); }
+  .status-chip.dead  { color: var(--critical);   border-color: var(--critical); }
+
+  /* ── charts ───────────────────────────────────────────── */
+  .chart-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+
+  @media (max-width: 760px) {
+    .chart-grid { grid-template-columns: 1fr; }
+  }
+
+  .chart-card {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 16px 16px 10px;
+    min-width: 0;
+  }
+
+  .chart-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+
+  .chart-title { font-size: 14px; font-weight: 600; color: var(--ink); }
+
+  .chart-sub {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    padding: 2px 0 0;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+  .axis-line { stroke: var(--rule); stroke-width: 1; }
+  .gridline  { stroke: var(--hair); stroke-width: 1; }
+  .tick-txt  { font-family: var(--mono); font-size: 9.5px; fill: var(--muted); }
+  .dl-txt    { font-family: var(--mono); font-size: 10px; }
+  .axis-name { font-family: var(--mono); font-size: 9.5px; fill: var(--muted); letter-spacing: 0.08em; }
+
+  .hit { fill: transparent; cursor: crosshair; }
+
+  .tip {
+    position: fixed;
+    pointer-events: none;
+    z-index: 20;
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 8px 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--ink);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.13);
+    opacity: 0;
+    transition: opacity 0.1s;
+    max-width: 240px;
+  }
+
+  .tip.on { opacity: 1; }
+  .tip b { font-weight: 600; }
+  .tip .r { color: var(--ink-2); }
+
+  /* ── table ────────────────────────────────────────────── */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 4px; background: var(--panel); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; min-width: 620px; }
+
+  th, td { padding: 8px 12px; text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+
+  thead th {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 400;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  tbody td { border-bottom: 1px solid var(--hair); font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12px; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.is-dilemma { background: color-mix(in srgb, var(--s-mixed) 8%, transparent); }
+
+  .flag {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 2px;
+    border: 1px solid var(--rule);
+    color: var(--ink-2);
+  }
+  .flag.yes { color: var(--critical); border-color: var(--critical); }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 20px;
+    font-size: 13px;
+    color: var(--ink-2);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  footer code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--panel-2);
+    padding: 1px 5px;
+    border-radius: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition-duration: 0.01ms !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Agent-based simulation · 6×6 grid · 4 foragers · 100 ticks</div>
+    <h1>The commons, tick by tick</h1>
+    <p class="standfirst">
+      Four foragers share a grid of renewable cells. Each tick they move to the richest
+      cell in reach and harvest it; then the grid regrows. Greedy foragers strip a cell
+      to nothing. Cautious ones leave half behind. Whether restraint pays turns entirely
+      on how fast the resource comes back — and on whether regrowth is pooled across the
+      whole map or has to spread from the neighbours that survived.
+    </p>
+  </header>
+
+  <div class="controls" role="group" aria-label="Simulation parameters">
+    <div class="ctl">
+      <span class="ctl-label" id="lbl-rule">Regrowth rule</span>
+      <div class="chips" id="pick-rule" role="group" aria-labelledby="lbl-rule"></div>
+    </div>
+    <div class="ctl">
+      <span class="ctl-label" id="lbl-r">Regrowth rate r</span>
+      <div class="chips" id="pick-r" role="group" aria-labelledby="lbl-r"></div>
+    </div>
+    <div class="ctl">
+      <span class="ctl-label" id="lbl-mix">Group</span>
+      <div class="chips" id="pick-mix" role="group" aria-labelledby="lbl-mix"></div>
+    </div>
+  </div>
+
+  <section class="stage">
+    <div class="panel">
+      <div class="panel-title">Resource map — seed <span id="seed-lbl"></span></div>
+      <svg id="grid" viewBox="0 0 360 360" role="img" aria-label="Resource grid; darker green means more resource remaining"></svg>
+      <div class="transport">
+        <button id="play" type="button">Play</button>
+        <button id="step" type="button">Step</button>
+        <input type="range" id="scrub" min="0" max="100" value="0" aria-label="Tick" />
+        <span class="tickread" id="tickread">t 0</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Readout</div>
+      <div id="readout"></div>
+      <div class="stock-bar" aria-hidden="true"><div class="stock-fill" id="stockfill" style="width:100%"></div></div>
+      <div id="verdict"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>Does restraint pay?</h2>
+      <p class="section-note">
+        Group totals across 40 seeds, with whiskers showing one standard deviation.
+        Where the teal line sits above the rust one, a group of cautious foragers
+        out-harvests a group of greedy ones — the signature of a commons worth
+        protecting. Where rust wins, regrowth outruns extraction and there is no
+        dilemma to speak of. The dashed marker follows your selection above.
+      </p>
+    </div>
+    <div class="legend" id="legend-main"></div>
+    <div class="chart-grid" id="charts-main"></div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>The temptation, per forager</h2>
+      <p class="section-note">
+        Inside the mixed group, what one greedy forager earns against what one cautious
+        forager earns. A dilemma needs both things at once: the individual gap below,
+        and the collective loss above. The band marks where the commons actually
+        collapsed before tick 100.
+      </p>
+    </div>
+    <div class="legend" id="legend-payoff"></div>
+    <div class="chart-grid" id="charts-payoff"></div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>Every number</h2>
+      <p class="section-note">
+        The same data as a table. Rows shaded violet are the configurations where the
+        greedy forager out-earns the cautious one <em>and</em> the commons collapsed in
+        at least half the runs — a genuine tragedy of the commons. Values are means
+        over <span id="seed-count">40</span> seeds; the x-axis above is linear, which
+        is why the three low rates cluster together.
+      </p>
+    </div>
+    <div class="table-scroll">
+      <table id="datatable">
+        <thead>
+          <tr>
+            <th scope="col">Rule</th><th scope="col">r</th>
+            <th scope="col">Group</th>
+            <th scope="col">Survived</th><th scope="col">± sd</th>
+            <th scope="col">Harvest</th><th scope="col">± sd</th>
+            <th scope="col">Collapsed</th>
+            <th scope="col">Dilemma</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <div>
+      Every figure is produced by the simulation itself — <code>export_viz.py</code> replays
+      <code>compare.run()</code> and records each tick, and the replay is asserted identical to
+      the original for all 30 configurations. Nothing here re-implements the rules in the browser.
+    </div>
+    <div>
+      Summary statistics average 40 seeds; the map plays back seed 0. Movement ties and
+      per-tick activation order are the two random draws.
+    </div>
+  </footer>
+</div>
+
+<div class="tip" id="tip" role="status" aria-live="polite"></div>
+
+<script id="viz-data" type="application/json">/*__VIZ_DATA__*/</script>
+
+<script>
+(function () {
+  "use strict";
+
+  const D = JSON.parse(document.getElementById("viz-data").textContent);
+  const tip = document.getElementById("tip");
+
+  const RULE_LABEL = { global: "Global (pooled)", neighbour: "Neighbour (local)" };
+  const MIX_COLOR = { greedy4: "--s-greedy", cautious4: "--s-cautious", mixed: "--s-mixed" };
+  const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+  const state = { rule: "global", r: String(D.rValues[2]), mix: "mixed", tick: 0, playing: false };
+
+  /* ── controls ───────────────────────────────────────── */
+  function buildChips(host, items, key, onPick) {
+    host.innerHTML = "";
+    items.forEach(({ value, label }) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip";
+      b.textContent = label;
+      b.setAttribute("aria-pressed", String(state[key] === value));
+      b.addEventListener("click", () => {
+        state[key] = value;
+        [...host.children].forEach((c) => c.setAttribute("aria-pressed", "false"));
+        b.setAttribute("aria-pressed", "true");
+        onPick();
+      });
+      host.appendChild(b);
+    });
+  }
+
+  buildChips(document.getElementById("pick-rule"),
+    D.rules.map((v) => ({ value: v, label: RULE_LABEL[v] })), "rule", onChange);
+  buildChips(document.getElementById("pick-r"),
+    D.rValues.map((v) => ({ value: String(v), label: String(v) })), "r", onChange);
+  buildChips(document.getElementById("pick-mix"),
+    D.mixes.map((m) => ({ value: m.key, label: m.label })), "mix", onChange);
+
+  /* ── grid player ────────────────────────────────────── */
+  const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  function decodeFrame(s) {
+    const out = [];
+    for (let i = 0; i < s.length; i += 4) {
+      const n = (B64.indexOf(s[i]) << 18) | (B64.indexOf(s[i + 1]) << 12) |
+                ((B64.indexOf(s[i + 2]) & 63) << 6) | (B64.indexOf(s[i + 3]) & 63);
+      out.push((n >> 16) & 255, (n >> 8) & 255, n & 255);
+    }
+    return out.slice(0, D.n * D.n).map((v) => v / 255);
+  }
+
+  const runCache = {};
+  function currentRun() {
+    const k = state.rule + "|" + state.r + "|" + state.mix;
+    if (!runCache[k]) {
+      const raw = D.runs[k];
+      runCache[k] = { ...raw, grids: raw.frames.map(decodeFrame) };
+    }
+    return runCache[k];
+  }
+
+  const RAMP = ["--g0", "--g1", "--g2", "--g3", "--g4", "--g5", "--g6"];
+  function cellFill(v) {
+    const t = Math.max(0, Math.min(1, v)) * (RAMP.length - 1);
+    return cssv(RAMP[Math.round(t)]);
+  }
+
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const gridSvg = document.getElementById("grid");
+  const CELL = 56, GAP = 4, PAD = 6;
+
+  function drawGrid() {
+    const run = currentRun();
+    const t = Math.min(state.tick, run.grids.length - 1);
+    const g = run.grids[t];
+    const pos = run.pos[t];
+    const kinds = D.mixes.find((m) => m.key === state.mix).kinds;
+
+    gridSvg.innerHTML = "";
+    for (let y = 0; y < D.n; y++) {
+      for (let x = 0; x < D.n; x++) {
+        const v = g[y * D.n + x];
+        const rect = document.createElementNS(SVGNS, "rect");
+        rect.setAttribute("x", PAD + x * (CELL + GAP));
+        rect.setAttribute("y", PAD + y * (CELL + GAP));
+        rect.setAttribute("width", CELL);
+        rect.setAttribute("height", CELL);
+        rect.setAttribute("rx", 4);
+        rect.setAttribute("fill", cellFill(v));
+        rect.addEventListener("mousemove", (e) =>
+          showTip(e, `cell [${y},${x}]<br><b>${v.toFixed(3)}</b> <span class="r">of ${D.cap.toFixed(1)}</span>`));
+        rect.addEventListener("mouseleave", hideTip);
+        gridSvg.appendChild(rect);
+      }
+    }
+
+    for (let a = 0; a < 4; a++) {
+      const ay = +pos[a * 2], ax = +pos[a * 2 + 1];
+      const cx = PAD + ax * (CELL + GAP) + CELL / 2;
+      const cy = PAD + ay * (CELL + GAP) + CELL / 2;
+      const ring = document.createElementNS(SVGNS, "circle");
+      ring.setAttribute("cx", cx); ring.setAttribute("cy", cy); ring.setAttribute("r", 11);
+      ring.setAttribute("fill", cssv("--panel"));
+      gridSvg.appendChild(ring);
+      const dot = document.createElementNS(SVGNS, "circle");
+      dot.setAttribute("cx", cx); dot.setAttribute("cy", cy); dot.setAttribute("r", 8);
+      dot.setAttribute("fill", cssv(kinds[a] === "greedy" ? "--s-greedy" : "--s-cautious"));
+      dot.setAttribute("stroke", cssv("--panel"));
+      dot.setAttribute("stroke-width", 2);
+      gridSvg.appendChild(dot);
+      const lab = document.createElementNS(SVGNS, "text");
+      lab.setAttribute("x", cx); lab.setAttribute("y", cy + 3.2);
+      lab.setAttribute("text-anchor", "middle");
+      lab.setAttribute("font-size", "9");
+      lab.setAttribute("font-family", "ui-monospace, Consolas, monospace");
+      lab.setAttribute("fill", cssv("--panel"));
+      lab.textContent = kinds[a] === "greedy" ? "G" : "C";
+      gridSvg.appendChild(lab);
+    }
+  }
+
+  function drawReadout() {
+    const run = currentRun();
+    const t = Math.min(state.tick, run.grids.length - 1);
+    const kinds = D.mixes.find((m) => m.key === state.mix).kinds;
+    const stock = run.grids[t].reduce((a, b) => a + b, 0);
+    const full = D.n * D.n * D.cap;
+    const cum = run.cum[t];
+
+    const rows = [
+      ["Tick", `${t} / ${run.grids.length - 1}`],
+      ["Resource remaining", `${stock.toFixed(1)} / ${full.toFixed(0)}`],
+      ["Harvested so far", cum.reduce((a, b) => a + b, 0).toFixed(1)],
+    ];
+    let html = rows.map(([k, v]) =>
+      `<div class="stat-row"><span class="stat-key">${k}</span><span class="stat-val">${v}</span></div>`).join("");
+
+    html += cum.map((s, i) =>
+      `<div class="stat-row">
+         <span class="stat-key">
+           <span class="swatch" style="background:${cssv(kinds[i] === "greedy" ? "--s-greedy" : "--s-cautious")}"></span>
+           Forager ${i + 1} · ${kinds[i]}
+         </span>
+         <span class="stat-val">${s.toFixed(1)}</span>
+       </div>`).join("");
+
+    document.getElementById("readout").innerHTML = html;
+    document.getElementById("stockfill").style.width = (stock / full * 100) + "%";
+
+    const collapsed = run.survived < D.ticks;
+    document.getElementById("verdict").innerHTML = collapsed
+      ? `<span class="status-chip dead">▲ Collapsed at tick ${run.survived}</span>`
+      : `<span class="status-chip alive">● Survived all ${D.ticks} ticks</span>`;
+    document.getElementById("seed-lbl").textContent = D.replaySeed;
+  }
+
+  const scrub = document.getElementById("scrub");
+  const playBtn = document.getElementById("play");
+
+  function syncScrub() {
+    const run = currentRun();
+    scrub.max = String(run.grids.length - 1);
+    if (state.tick > run.grids.length - 1) state.tick = run.grids.length - 1;
+    scrub.value = String(state.tick);
+    document.getElementById("tickread").textContent = "t " + state.tick;
+  }
+
+  function render() { syncScrub(); drawGrid(); drawReadout(); }
+
+  function onChange() { state.tick = 0; render(); drawCharts(); }
+
+  scrub.addEventListener("input", () => { state.tick = +scrub.value; stop(); render(); });
+  document.getElementById("step").addEventListener("click", () => {
+    const run = currentRun();
+    state.tick = (state.tick + 1) % run.grids.length;
+    stop(); render();
+  });
+
+  let timer = null;
+  function stop() { state.playing = false; playBtn.textContent = "Play"; if (timer) { clearInterval(timer); timer = null; } }
+  playBtn.addEventListener("click", () => {
+    if (state.playing) { stop(); return; }
+    state.playing = true; playBtn.textContent = "Pause";
+    timer = setInterval(() => {
+      const run = currentRun();
+      state.tick++;
+      if (state.tick > run.grids.length - 1) { state.tick = run.grids.length - 1; stop(); }
+      render();
+    }, 130);
+  });
+
+  /* ── charts ─────────────────────────────────────────── */
+  function showTip(e, html) {
+    tip.innerHTML = html;
+    tip.classList.add("on");
+    const pad = 14;
+    let x = e.clientX + pad, y = e.clientY + pad;
+    const r = tip.getBoundingClientRect();
+    if (x + r.width > innerWidth - 8) x = e.clientX - r.width - pad;
+    if (y + r.height > innerHeight - 8) y = e.clientY - r.height - pad;
+    tip.style.left = x + "px";
+    tip.style.top = y + "px";
+  }
+  function hideTip() { tip.classList.remove("on"); }
+
+  const W = 400, H = 244, M = { t: 14, r: 46, b: 46, l: 42 };
+
+  function lineChart(host, opts) {
+    const { series, yDomain, yTicks, xLabel, yLabel, fmt } = opts;
+    const xs = D.rValues;
+    const x0 = Math.min(...xs), x1 = Math.max(...xs);
+    const px = (v) => M.l + (v - x0) / (x1 - x0) * (W - M.l - M.r);
+    const py = (v) => H - M.b - (v - yDomain[0]) / (yDomain[1] - yDomain[0]) * (H - M.t - M.b);
+
+    const svg = document.createElementNS(SVGNS, "svg");
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const add = (tag, attrs, parent) => {
+      const el = document.createElementNS(SVGNS, tag);
+      for (const k in attrs) el.setAttribute(k, attrs[k]);
+      (parent || svg).appendChild(el);
+      return el;
+    };
+
+    yTicks.forEach((v) => {
+      add("line", { x1: M.l, x2: W - M.r, y1: py(v), y2: py(v), class: "gridline" });
+      const t = add("text", { x: M.l - 7, y: py(v) + 3.2, class: "tick-txt", "text-anchor": "end" });
+      t.textContent = v;
+    });
+    add("line", { x1: M.l, x2: W - M.r, y1: H - M.b, y2: H - M.b, class: "axis-line" });
+
+    // selection marker
+    if (xs.includes(+state.r)) {
+      add("line", {
+        x1: px(+state.r), x2: px(+state.r), y1: M.t, y2: H - M.b,
+        stroke: cssv("--muted"), "stroke-width": 1, "stroke-dasharray": "3 3", opacity: 0.8,
+      });
+    }
+
+    // x is a true linear scale, so 0.11/0.13/0.15 sit ~16px apart while their
+    // labels are ~22px wide. Stagger onto a second row rather than respacing
+    // the marks -- the clustering is the point (the dilemma occupies a narrow
+    // band of r), so distorting it to fit labels would misreport the data.
+    let lastLabelX = -Infinity, row = 0;
+    xs.forEach((v) => {
+      row = (px(v) - lastLabelX < 26) ? 1 - row : 0;
+      lastLabelX = px(v);
+      const t = add("text", {
+        x: px(v), y: H - M.b + (row ? 24 : 14), class: "tick-txt", "text-anchor": "middle",
+      });
+      t.textContent = v;
+      if (row) {
+        add("line", {
+          x1: px(v), x2: px(v), y1: H - M.b, y2: H - M.b + 16,
+          stroke: cssv("--rule"), "stroke-width": 1,
+        });
+      }
+    });
+    const xn = add("text", { x: (M.l + W - M.r) / 2, y: H - 3, class: "axis-name", "text-anchor": "middle" });
+    xn.textContent = xLabel;
+    const yn = add("text", { x: 0, y: 0, class: "axis-name", "text-anchor": "middle",
+      transform: `translate(11 ${(M.t + H - M.b) / 2}) rotate(-90)` });
+    yn.textContent = yLabel;
+
+    series.forEach((s) => {
+      const col = cssv(s.color);
+      // error whiskers
+      s.points.forEach((p) => {
+        if (!p.sd) return;
+        const lo = Math.max(yDomain[0], p.y - p.sd), hi = Math.min(yDomain[1], p.y + p.sd);
+        add("line", { x1: px(p.x), x2: px(p.x), y1: py(lo), y2: py(hi), stroke: col, "stroke-width": 1, opacity: 0.5 });
+        add("line", { x1: px(p.x) - 2.5, x2: px(p.x) + 2.5, y1: py(hi), y2: py(hi), stroke: col, "stroke-width": 1, opacity: 0.5 });
+        add("line", { x1: px(p.x) - 2.5, x2: px(p.x) + 2.5, y1: py(lo), y2: py(lo), stroke: col, "stroke-width": 1, opacity: 0.5 });
+      });
+      add("path", {
+        d: s.points.map((p, i) => (i ? "L" : "M") + px(p.x) + " " + py(p.y)).join(" "),
+        fill: "none", stroke: col, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round",
+      });
+      s.points.forEach((p) => {
+        add("circle", { cx: px(p.x), cy: py(p.y), r: 4, fill: col, stroke: cssv("--panel"), "stroke-width": 2 });
+      });
+      const last = s.points[s.points.length - 1];
+      const dl = add("text", {
+        x: px(last.x) + 8, y: py(last.y) + 3.4, class: "dl-txt", fill: col,
+      });
+      dl.textContent = s.short;
+    });
+
+    // hover columns
+    xs.forEach((xv) => {
+      const band = (W - M.l - M.r) / xs.length;
+      const hit = add("rect", { x: px(xv) - band / 2, y: M.t, width: band, height: H - M.t - M.b, class: "hit" });
+      hit.addEventListener("mousemove", (e) => {
+        const lines = series.map((s) => {
+          const p = s.points.find((q) => q.x === xv);
+          return `<span class="r">${s.label}</span> <b>${fmt(p.y)}</b>${p.sd ? ` <span class="r">± ${p.sd.toFixed(1)}</span>` : ""}`;
+        }).join("<br>");
+        showTip(e, `<b>r = ${xv}</b><br>${lines}`);
+      });
+      hit.addEventListener("mouseleave", hideTip);
+    });
+
+    host.appendChild(svg);
+  }
+
+  function card(title, sub) {
+    const el = document.createElement("div");
+    el.className = "chart-card";
+    el.innerHTML = `<div class="chart-head"><span class="chart-title">${title}</span><span class="chart-sub">${sub}</span></div>`;
+    return el;
+  }
+
+  function legend(host, items) {
+    host.innerHTML = items.map((i) =>
+      `<span class="legend-item"><span class="swatch" style="background:${cssv(i.color)}"></span>${i.label}</span>`).join("");
+  }
+
+  function drawCharts() {
+    const main = document.getElementById("charts-main");
+    const pay = document.getElementById("charts-payoff");
+    main.innerHTML = ""; pay.innerHTML = "";
+
+    legend(document.getElementById("legend-main"),
+      D.mixes.map((m) => ({ label: m.label, color: MIX_COLOR[m.key] })));
+    legend(document.getElementById("legend-payoff"), [
+      { label: "One greedy forager", color: "--s-greedy" },
+      { label: "One cautious forager", color: "--s-cautious" },
+    ]);
+
+    D.rules.forEach((rule) => {
+      const c = card("Total harvest", RULE_LABEL[rule]);
+      lineChart(c, {
+        series: D.mixes.map((m) => ({
+          label: m.label,
+          short: m.key === "greedy4" ? "4G" : m.key === "cautious4" ? "4C" : "2/2",
+          color: MIX_COLOR[m.key],
+          points: D.rValues.map((r) => ({
+            x: r, y: D.sweep[rule][String(r)][m.key].harvMean, sd: D.sweep[rule][String(r)][m.key].harvSd,
+          })),
+        })),
+        yDomain: [0, 240], yTicks: [0, 60, 120, 180, 240],
+        xLabel: "REGROWTH RATE r", yLabel: "HARVEST", fmt: (v) => v.toFixed(1),
+      });
+      main.appendChild(c);
+    });
+
+    D.rules.forEach((rule) => {
+      const c = card("Ticks survived", RULE_LABEL[rule]);
+      lineChart(c, {
+        series: D.mixes.map((m) => ({
+          label: m.label,
+          short: m.key === "greedy4" ? "4G" : m.key === "cautious4" ? "4C" : "2/2",
+          color: MIX_COLOR[m.key],
+          points: D.rValues.map((r) => ({
+            x: r, y: D.sweep[rule][String(r)][m.key].survMean, sd: D.sweep[rule][String(r)][m.key].survSd,
+          })),
+        })),
+        yDomain: [0, 100], yTicks: [0, 25, 50, 75, 100],
+        xLabel: "REGROWTH RATE r", yLabel: "TICKS", fmt: (v) => v.toFixed(1),
+      });
+      main.appendChild(c);
+    });
+
+    D.rules.forEach((rule) => {
+      const c = card("Payoff inside the mixed group", RULE_LABEL[rule]);
+      lineChart(c, {
+        series: [
+          { label: "Greedy", short: "G", color: "--s-greedy",
+            points: D.rValues.map((r) => ({ x: r, y: D.sweep[rule][String(r)].mixed.greedyEach, sd: 0 })) },
+          { label: "Cautious", short: "C", color: "--s-cautious",
+            points: D.rValues.map((r) => ({ x: r, y: D.sweep[rule][String(r)].mixed.cautiousEach, sd: 0 })) },
+        ],
+        yDomain: [0, 60], yTicks: [0, 15, 30, 45, 60],
+        xLabel: "REGROWTH RATE r", yLabel: "PER FORAGER", fmt: (v) => v.toFixed(1),
+      });
+      pay.appendChild(c);
+    });
+  }
+
+  /* ── table ──────────────────────────────────────────── */
+  function drawTable() {
+    const rows = [];
+    D.rules.forEach((rule) => {
+      D.rValues.forEach((r) => {
+        D.mixes.forEach((m) => {
+          const s = D.sweep[rule][String(r)][m.key];
+          // Majority-of-runs, not mean-survived < 100: at neighbour/0.15 only
+          // 5% of seeds collapse, so the mean rounds to 100.0 on screen while
+          // still testing below it -- a row that reads "survived 100.0" must
+          // not carry a collapse verdict.
+          const dilemma = m.key === "mixed" && s.greedyEach > s.cautiousEach && s.collapseRate >= 0.5;
+          rows.push(`<tr class="${dilemma ? "is-dilemma" : ""}">
+            <td>${RULE_LABEL[rule]}</td>
+            <td>${r}</td>
+            <td>${m.label}</td>
+            <td>${s.survMean.toFixed(1)}</td>
+            <td>${s.survSd.toFixed(1)}</td>
+            <td>${s.harvMean.toFixed(1)}</td>
+            <td>${s.harvSd.toFixed(1)}</td>
+            <td>${(s.collapseRate * 100).toFixed(0)}%</td>
+            <td>${m.key === "mixed" ? `<span class="flag ${dilemma ? "yes" : ""}">${dilemma ? "yes" : "no"}</span>` : "—"}</td>
+          </tr>`);
+        });
+      });
+    });
+    document.getElementById("tbody").innerHTML = rows.join("");
+  }
+
+  document.getElementById("seed-count").textContent = D.seeds;
+
+  render();
+  drawCharts();
+  drawTable();
+
+  const mq = matchMedia("(prefers-color-scheme: dark)");
+  mq.addEventListener("change", () => { render(); drawCharts(); });
+  new MutationObserver(() => { render(); drawCharts(); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>
