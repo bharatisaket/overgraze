@@ -17,6 +17,10 @@ CAP = 1.0    # max resource a single cell can hold
 TICKS = 100  # length of one simulation run
 TAKE = 0.55  # max an agent can harvest in a single tick
 
+# Regrowth rates to sweep. payoff.py imports this rather than keeping its own
+# copy, so the two scripts always report on the same rates.
+R_VALUES = [0.11, 0.13, 0.15, 0.30, 0.50]
+
 
 def neighbours_mean(g):
     """Average resource level in each cell's 3x3 neighbourhood (including itself).
@@ -158,7 +162,7 @@ def run(rule, r, mix, seed):
 print(f"{'rule':<8}{'r':<7}{'mix':<26}{'survived':<10}{'harvest':<10}")
 print("-"*63)
 for rule in ['global', 'neighbour']:
-    for r in [0.11, 0.13, 0.15, 0.30, 0.50]:
+    for r in R_VALUES:
         for mix, label in [(['greedy']*4, '4 greedy'),
                            (['cautious']*4, '4 cautious'),
                            (['greedy', 'greedy', 'cautious', 'cautious'], '2 greedy / 2 cautious')]:

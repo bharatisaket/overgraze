@@ -1,12 +1,12 @@
 import numpy as np
-from compare import run, N, CAP
+from compare import run, N, CAP, R_VALUES
 
 print("MIXED RUNS: does the greedy agent out-earn the cautious one?")
 print(f"{'rule':<11}{'r':<7}{'greedy avg':<13}{'cautious avg':<15}{'survived':<10}{'dilemma?'}")
 print("-"*72)
 mix = ['greedy','greedy','cautious','cautious']
 for rule in ['global','neighbour']:
-    for r in [0.10, 0.12, 0.15, 0.18, 0.22, 0.30]:
+    for r in R_VALUES:
         res = [run(rule, r, mix, s) for s in range(20)]
         gs = np.mean([np.mean(x[2][:2]) for x in res])
         cs = np.mean([np.mean(x[2][2:]) for x in res])
