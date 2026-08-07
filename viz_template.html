@@ -268,6 +268,30 @@
     display: inline-block;
   }
 
+  .map-key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    font-size: 11.5px;
+    color: var(--ink-2);
+  }
+
+  .key-item { display: inline-flex; align-items: center; gap: 5px; }
+
+  .key-ico { width: auto; height: 21px; flex: none; }
+
+  .stock-wrap { display: flex; flex-direction: column; gap: 4px; }
+
+  .stock-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .speed-ctl { flex-direction: row; align-items: center; gap: 9px; }
+
   .stock-bar {
     height: 6px;
     background: var(--panel-2);
@@ -462,13 +486,32 @@
 
   <section class="stage">
     <div class="panel">
-      <div class="panel-title">Resource map — seed <span id="seed-lbl"></span></div>
-      <svg id="grid" viewBox="0 0 360 360" role="img" aria-label="Resource grid; darker green means more resource remaining"></svg>
+      <div class="panel-title">Pasture — seed <span id="seed-lbl"></span></div>
+      <svg id="grid" viewBox="0 0 360 360" role="img"
+           aria-label="Pasture map. Each cell shows tufts of grass; fewer tufts means less resource left. Horned animals are greedy foragers, woolly ones are cautious."></svg>
+
+      <div class="map-key">
+        <span class="key-item"><svg class="key-ico" viewBox="0 0 34 20" aria-hidden="true" data-key="grass-full"></svg>full cell</span>
+        <span class="key-item"><svg class="key-ico" viewBox="0 0 34 20" aria-hidden="true" data-key="grass-half"></svg>half</span>
+        <span class="key-item"><svg class="key-ico" viewBox="0 0 34 20" aria-hidden="true" data-key="grass-bare"></svg>stripped</span>
+        <span class="key-item"><svg class="key-ico" viewBox="0 0 42 26" aria-hidden="true" data-key="greedy"></svg>greedy (horned)</span>
+        <span class="key-item"><svg class="key-ico" viewBox="0 0 42 26" aria-hidden="true" data-key="cautious"></svg>cautious (woolly)</span>
+      </div>
+
+      <div class="stock-wrap">
+        <div class="stock-label">Total grass on the map</div>
+        <svg id="stockline" viewBox="0 0 360 56" role="img" aria-label="Total resource over time, with a playhead at the current tick"></svg>
+      </div>
+
       <div class="transport">
         <button id="play" type="button">Play</button>
         <button id="step" type="button">Step</button>
         <input type="range" id="scrub" min="0" max="100" value="0" aria-label="Tick" />
         <span class="tickread" id="tickread">t 0</span>
+      </div>
+      <div class="ctl speed-ctl">
+        <span class="ctl-label" id="lbl-speed">Speed</span>
+        <div class="chips" id="pick-speed" role="group" aria-labelledby="lbl-speed"></div>
       </div>
     </div>
 
@@ -565,7 +608,7 @@
   const MIX_COLOR = { greedy4: "--s-greedy", cautious4: "--s-cautious", mixed: "--s-mixed" };
   const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
-  const state = { rule: "global", r: String(D.rValues[2]), mix: "mixed", tick: 0, playing: false };
+  const state = { rule: "global", r: String(D.rValues[2]), mix: "mixed", tick: 0, playing: false, speed: 1 };
 
   /* ── controls ───────────────────────────────────────── */
   function buildChips(host, items, key, onPick) {
@@ -615,64 +658,244 @@
     return runCache[k];
   }
 
-  const RAMP = ["--g0", "--g1", "--g2", "--g3", "--g4", "--g5", "--g6"];
-  function cellFill(v) {
-    const t = Math.max(0, Math.min(1, v)) * (RAMP.length - 1);
-    return cssv(RAMP[Math.round(t)]);
-  }
-
   const SVGNS = "http://www.w3.org/2000/svg";
   const gridSvg = document.getElementById("grid");
+  const stockSvg = document.getElementById("stockline");
   const CELL = 56, GAP = 4, PAD = 6;
+  const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  function drawGrid() {
+  function mk(tag, attrs, parent) {
+    const el = document.createElementNS(SVGNS, tag);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+
+  /* Soil uses only the pale half of the validated one-hue ramp, and the number
+     of grass tufts standing on it carries the same magnitude a second time.
+     Encoding it twice is what makes the map readable: the tufts keep a single
+     contrasting green at every soil step, partial cells look partial, and the
+     resource level survives being printed in greyscale. */
+  const SOIL = ["--g0", "--g1", "--g2", "--g3"];
+  const soilFill = (v) => cssv(SOIL[Math.round(Math.max(0, Math.min(1, v)) * (SOIL.length - 1))]);
+  const MAX_TUFTS = 8;
+
+  /* Deterministic per-slot jitter: tuft i always stands in the same spot, so
+     grazing plucks tufts out one at a time instead of reshuffling the cell. */
+  function rnd(x, y, i) {
+    // Math.imul throughout: the usual integer-hash constants overflow 2^53 as
+    // plain JS multiplies, and the lost precision collapses the output onto a
+    // handful of values -- which stacks every tuft in a cell on one spot.
+    let n = (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(i, 83492791)) | 0;
+    n = (n ^ (n >>> 15)) | 0;
+    n = Math.imul(n, 2246822519) | 0;
+    n = (n ^ (n >>> 13)) | 0;
+    n = Math.imul(n, 3266489917) | 0;
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+  }
+
+  function tuft(px, py, scale, colour, parent) {
+    const g = mk("g", { transform: `translate(${px} ${py}) scale(${scale})` }, parent);
+    const blade = (d) => mk("path", { d, fill: "none", stroke: colour, "stroke-width": 1.5, "stroke-linecap": "round" }, g);
+    blade("M0 0 C -0.6 -3.4 -2.2 -5.2 -3.6 -6.4");
+    blade("M0 0 C 0.2 -3.8 0.2 -5.8 0 -7.6");
+    blade("M0 0 C 0.9 -3.3 2.3 -5.0 3.7 -6.2");
+    return g;
+  }
+
+  /* Kind is carried by silhouette as well as colour -- greedy animals are
+     horned, cautious ones are woolly -- so the two never rely on hue alone. */
+  function forager(kind, facing, parent) {
+    const col = cssv(kind === "greedy" ? "--s-greedy" : "--s-cautious");
+    const ring = cssv("--panel");
+    const g = mk("g", { transform: `scale(${facing < 0 ? -1 : 1} 1)` }, parent);
+    mk("ellipse", { cx: 0, cy: 12, rx: 12, ry: 2.4, fill: cssv("--ink"), opacity: 0.14 }, g);
+    [-7, -3, 3, 7].forEach((x) =>
+      mk("line", { x1: x, y1: 2, x2: x, y2: 11.5, stroke: col, "stroke-width": 2.2, "stroke-linecap": "round" }, g));
+    mk("path", { d: "M-10.5 -3 q -4.5 -1.5 -5.5 -6", fill: "none", stroke: col, "stroke-width": 2, "stroke-linecap": "round" }, g);
+    if (kind === "cautious") {
+      mk("path", {
+        d: "M-11 1 a 4.3 4.3 0 0 1 4.6 -5 a 4.3 4.3 0 0 1 6 -0.8 a 4.3 4.3 0 0 1 5.9 1.6 l 0 5.4 a 5 5 0 0 1 -5 3.6 l -6.5 0 a 5 5 0 0 1 -5 -3.6 z",
+        fill: col, stroke: ring, "stroke-width": 1.5, "stroke-linejoin": "round",
+      }, g);
+    } else {
+      mk("ellipse", { cx: 0, cy: 0, rx: 11, ry: 7, fill: col, stroke: ring, "stroke-width": 1.5 }, g);
+    }
+    mk("circle", { cx: 11.5, cy: -4.5, r: 4.8, fill: col, stroke: ring, "stroke-width": 1.5 }, g);
+    if (kind === "greedy") {
+      // horns sweep back over the neck, the way a goat's do -- forward-curling
+      // ones read as antennae at this size
+      mk("path", { d: "M12.8 -8.6 q -0.8 -5.4 -5.6 -6.2", fill: "none", stroke: col, "stroke-width": 2, "stroke-linecap": "round" }, g);
+      mk("path", { d: "M10.2 -8 q -1.4 -4.4 -5.4 -5", fill: "none", stroke: col, "stroke-width": 2, "stroke-linecap": "round" }, g);
+    } else {
+      mk("path", { d: "M9.8 -7.4 q -3.6 -1.6 -5.2 0.6", fill: "none", stroke: col, "stroke-width": 1.9, "stroke-linecap": "round" }, g);
+    }
+    mk("circle", { cx: 13.4, cy: -5, r: 1.15, fill: ring }, g);
+    return g;
+  }
+
+  const layerCells = mk("g", {}, gridSvg);
+  const layerAgents = mk("g", {}, gridSvg);
+
+  const cellCx = (x) => PAD + x * (CELL + GAP) + CELL / 2;
+  const cellCy = (y) => PAD + y * (CELL + GAP) + CELL / 2;
+
+  function drawCells(t) {
     const run = currentRun();
-    const t = Math.min(state.tick, run.grids.length - 1);
     const g = run.grids[t];
     const pos = run.pos[t];
-    const kinds = D.mixes.find((m) => m.key === state.mix).kinds;
+    const grazed = new Set();
+    for (let a = 0; a < 4; a++) grazed.add(pos[a * 2] + "," + pos[a * 2 + 1]);
 
-    gridSvg.innerHTML = "";
+    layerCells.textContent = "";
+    const tuftCol = cssv("--g6");
+
     for (let y = 0; y < D.n; y++) {
       for (let x = 0; x < D.n; x++) {
         const v = g[y * D.n + x];
-        const rect = document.createElementNS(SVGNS, "rect");
-        rect.setAttribute("x", PAD + x * (CELL + GAP));
-        rect.setAttribute("y", PAD + y * (CELL + GAP));
-        rect.setAttribute("width", CELL);
-        rect.setAttribute("height", CELL);
-        rect.setAttribute("rx", 4);
-        rect.setAttribute("fill", cellFill(v));
-        rect.addEventListener("mousemove", (e) =>
-          showTip(e, `cell [${y},${x}]<br><b>${v.toFixed(3)}</b> <span class="r">of ${D.cap.toFixed(1)}</span>`));
-        rect.addEventListener("mouseleave", hideTip);
-        gridSvg.appendChild(rect);
+        const gx = PAD + x * (CELL + GAP), gy = PAD + y * (CELL + GAP);
+        const cell = mk("g", {}, layerCells);
+        mk("rect", { x: gx, y: gy, width: CELL, height: CELL, rx: 4, fill: soilFill(v) }, cell);
+
+        if (v < 0.08) {
+          for (let i = 0; i < 5; i++) {
+            mk("ellipse", {
+              cx: gx + 9 + rnd(x, y, i + 40) * (CELL - 18),
+              cy: gy + 9 + rnd(x, y, i + 70) * (CELL - 18),
+              rx: 2.4, ry: 1.1, fill: cssv("--muted"), opacity: 0.3,
+            }, cell);
+          }
+        }
+
+        const n = Math.ceil(Math.max(0, Math.min(1, v)) * MAX_TUFTS);
+        const frac = Math.max(0, Math.min(1, v * MAX_TUFTS - (n - 1)));
+        for (let i = 0; i < n; i++) {
+          const s = 0.78 + 0.34 * rnd(x, y, i + 21);
+          tuft(gx + 9 + rnd(x, y, i) * (CELL - 18),
+               gy + 15 + rnd(x, y, i + 11) * (CELL - 24),
+               i === n - 1 ? s * (0.45 + 0.55 * frac) : s, tuftCol, cell);
+        }
+
+        if (grazed.has(y + "," + x)) {
+          mk("rect", {
+            x: gx + 0.9, y: gy + 0.9, width: CELL - 1.8, height: CELL - 1.8, rx: 3.4,
+            fill: "none", stroke: cssv("--ink-2"), "stroke-width": 1.4,
+            "stroke-dasharray": "3 3", opacity: 0.5,
+          }, cell);
+        }
+
+        const hit = mk("rect", { x: gx, y: gy, width: CELL, height: CELL, rx: 4, fill: "transparent" }, cell);
+        hit.addEventListener("mousemove", (e) => showTip(e,
+          `cell [${y},${x}]<br><b>${v.toFixed(3)}</b> <span class="r">of ${D.cap.toFixed(1)}</span>` +
+          (grazed.has(y + "," + x) ? `<br><span class="r">grazed this tick</span>` : "")));
+        hit.addEventListener("mouseleave", hideTip);
       }
     }
+  }
 
-    for (let a = 0; a < 4; a++) {
-      const ay = +pos[a * 2], ax = +pos[a * 2 + 1];
-      const cx = PAD + ax * (CELL + GAP) + CELL / 2;
-      const cy = PAD + ay * (CELL + GAP) + CELL / 2;
-      const ring = document.createElementNS(SVGNS, "circle");
-      ring.setAttribute("cx", cx); ring.setAttribute("cy", cy); ring.setAttribute("r", 11);
-      ring.setAttribute("fill", cssv("--panel"));
-      gridSvg.appendChild(ring);
-      const dot = document.createElementNS(SVGNS, "circle");
-      dot.setAttribute("cx", cx); dot.setAttribute("cy", cy); dot.setAttribute("r", 8);
-      dot.setAttribute("fill", cssv(kinds[a] === "greedy" ? "--s-greedy" : "--s-cautious"));
-      dot.setAttribute("stroke", cssv("--panel"));
-      dot.setAttribute("stroke-width", 2);
-      gridSvg.appendChild(dot);
-      const lab = document.createElementNS(SVGNS, "text");
-      lab.setAttribute("x", cx); lab.setAttribute("y", cy + 3.2);
-      lab.setAttribute("text-anchor", "middle");
-      lab.setAttribute("font-size", "9");
-      lab.setAttribute("font-family", "ui-monospace, Consolas, monospace");
-      lab.setAttribute("fill", cssv("--panel"));
-      lab.textContent = kinds[a] === "greedy" ? "G" : "C";
-      gridSvg.appendChild(lab);
+  let agentNodes = [], builtMix = null;
+
+  function buildAgents() {
+    layerAgents.textContent = "";
+    agentNodes = D.mixes.find((m) => m.key === state.mix).kinds.map((kind) => {
+      const holder = mk("g", {}, layerAgents);
+      forager(kind, 1, holder);
+      return { holder, kind, facing: 1 };
+    });
+  }
+
+  function placeAgents(pA, pB, k) {
+    agentNodes.forEach((node, a) => {
+      const y0 = +pA[a * 2], x0 = +pA[a * 2 + 1];
+      const y1 = +pB[a * 2], x1 = +pB[a * 2 + 1];
+      const dir = x1 > x0 ? 1 : x1 < x0 ? -1 : node.facing;
+      if (dir !== node.facing) {
+        node.facing = dir;
+        node.holder.textContent = "";
+        forager(node.kind, dir, node.holder);
+      }
+      const cx = cellCx(x0) + (cellCx(x1) - cellCx(x0)) * k;
+      const cy = cellCy(y0) + (cellCy(y1) - cellCy(y0)) * k;
+      // a small hop through the move sells it as walking rather than teleporting
+      const hop = REDUCED ? 0 : -Math.sin(Math.PI * k) * 5;
+      node.holder.setAttribute("transform", `translate(${cx} ${cy + hop})`);
+    });
+  }
+
+  let rafId = null;
+
+  function drawGrid(fromTick) {
+    const run = currentRun();
+    const t = Math.min(state.tick, run.grids.length - 1);
+    drawCells(t);
+    if (builtMix !== state.mix) { buildAgents(); builtMix = state.mix; }
+
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    const pB = run.pos[t];
+
+    if (!REDUCED && fromTick != null && Math.abs(t - fromTick) === 1) {
+      const pA = run.pos[fromTick];
+      const t0 = performance.now(), dur = Math.max(80, 190 / state.speed);
+      const frame = (now) => {
+        const k = Math.min(1, (now - t0) / dur);
+        placeAgents(pA, pB, k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2);
+        rafId = k < 1 ? requestAnimationFrame(frame) : null;
+      };
+      rafId = requestAnimationFrame(frame);
+    } else {
+      placeAgents(pB, pB, 1);
     }
+  }
+
+  function drawStockline() {
+    const run = currentRun();
+    const WS = 360, HS = 56, m = { t: 6, b: 11, l: 4, r: 4 };
+    const full = D.n * D.n * D.cap;
+    const n = run.grids.length;
+    const sx = (i) => m.l + (n <= 1 ? 0 : i / (n - 1)) * (WS - m.l - m.r);
+    const sy = (v) => HS - m.b - (v / full) * (HS - m.t - m.b);
+    const stocks = run.grids.map((gr) => gr.reduce((a, b) => a + b, 0));
+
+    stockSvg.textContent = "";
+    mk("line", {
+      x1: m.l, x2: WS - m.r, y1: sy(0.05 * full), y2: sy(0.05 * full),
+      stroke: cssv("--critical"), "stroke-width": 1, "stroke-dasharray": "2 3", opacity: 0.75,
+    }, stockSvg);
+    mk("path", {
+      d: `M${sx(0)} ${sy(0)} ` + stocks.map((v, i) => `L${sx(i)} ${sy(v)}`).join(" ") + ` L${sx(n - 1)} ${sy(0)} Z`,
+      fill: cssv("--g4"), opacity: 0.22,
+    }, stockSvg);
+    mk("path", {
+      d: stocks.map((v, i) => (i ? "L" : "M") + sx(i) + " " + sy(v)).join(" "),
+      fill: "none", stroke: cssv("--g6"), "stroke-width": 2, "stroke-linejoin": "round",
+    }, stockSvg);
+    mk("line", { x1: m.l, x2: WS - m.r, y1: sy(0), y2: sy(0), stroke: cssv("--rule"), "stroke-width": 1 }, stockSvg);
+
+    const t = Math.min(state.tick, n - 1);
+    mk("line", { x1: sx(t), x2: sx(t), y1: m.t - 3, y2: sy(0), stroke: cssv("--ink-2"), "stroke-width": 1 }, stockSvg);
+    mk("circle", { cx: sx(t), cy: sy(stocks[t]), r: 3.4, fill: cssv("--g6"), stroke: cssv("--panel"), "stroke-width": 2 }, stockSvg);
+    const lab = mk("text", { x: WS - m.r, y: HS - 1, class: "tick-txt", "text-anchor": "end" }, stockSvg);
+    lab.textContent = "collapse floor " + (0.05 * full).toFixed(1);
+  }
+
+  function drawKey() {
+    document.querySelectorAll(".key-ico").forEach((svg) => {
+      svg.textContent = "";
+      const k = svg.dataset.key;
+      if (k.indexOf("grass") === 0) {
+        const v = k === "grass-full" ? 1 : k === "grass-half" ? 0.5 : 0.02;
+        mk("rect", { x: 0, y: 0, width: 34, height: 20, rx: 3, fill: soilFill(v) }, svg);
+        if (v < 0.08) {
+          for (let i = 0; i < 3; i++)
+            mk("ellipse", { cx: 9 + i * 8, cy: 11, rx: 2.2, ry: 1, fill: cssv("--muted"), opacity: 0.42 }, svg);
+        } else {
+          const n = Math.round(v * 4);
+          for (let i = 0; i < n; i++) tuft(8 + i * 6.5, 16, 0.8, cssv("--g6"), svg);
+        }
+      } else {
+        forager(k, 1, mk("g", { transform: "translate(19 14) scale(0.92)" }, svg));
+      }
+    });
   }
 
   function drawReadout() {
@@ -721,9 +944,17 @@
     document.getElementById("tickread").textContent = "t " + state.tick;
   }
 
-  function render() { syncScrub(); drawGrid(); drawReadout(); }
+  let lastTick = null;
 
-  function onChange() { state.tick = 0; render(); drawCharts(); }
+  function render() {
+    syncScrub();
+    drawGrid(lastTick);
+    drawReadout();
+    drawStockline();
+    lastTick = state.tick;
+  }
+
+  function onChange() { state.tick = 0; lastTick = null; render(); drawCharts(); }
 
   scrub.addEventListener("input", () => { state.tick = +scrub.value; stop(); render(); });
   document.getElementById("step").addEventListener("click", () => {
@@ -734,16 +965,29 @@
 
   let timer = null;
   function stop() { state.playing = false; playBtn.textContent = "Play"; if (timer) { clearInterval(timer); timer = null; } }
-  playBtn.addEventListener("click", () => {
-    if (state.playing) { stop(); return; }
-    state.playing = true; playBtn.textContent = "Pause";
+
+  function start() {
+    if (timer) clearInterval(timer);
     timer = setInterval(() => {
       const run = currentRun();
       state.tick++;
       if (state.tick > run.grids.length - 1) { state.tick = run.grids.length - 1; stop(); }
       render();
-    }, 130);
+    }, 260 / state.speed);
+  }
+
+  playBtn.addEventListener("click", () => {
+    if (state.playing) { stop(); return; }
+    // replaying from a finished run should start over, not sit on the last tick
+    const run = currentRun();
+    if (state.tick >= run.grids.length - 1) { state.tick = 0; lastTick = null; render(); }
+    state.playing = true; playBtn.textContent = "Pause";
+    start();
   });
+
+  buildChips(document.getElementById("pick-speed"),
+    [{ value: 0.5, label: "0.5×" }, { value: 1, label: "1×" }, { value: 2, label: "2×" }],
+    "speed", () => { if (state.playing) start(); });
 
   /* ── charts ─────────────────────────────────────────── */
   function showTip(e, html) {
@@ -963,13 +1207,17 @@
 
   document.getElementById("seed-count").textContent = D.seeds;
 
+  drawKey();
   render();
   drawCharts();
   drawTable();
 
-  const mq = matchMedia("(prefers-color-scheme: dark)");
-  mq.addEventListener("change", () => { render(); drawCharts(); });
-  new MutationObserver(() => { render(); drawCharts(); })
+  // Theme colours are read at draw time, so a theme flip has to rebuild the
+  // agents too -- builtMix alone would skip them and leave the old hues.
+  function repaint() { builtMix = null; lastTick = null; drawKey(); render(); drawCharts(); }
+
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", repaint);
+  new MutationObserver(repaint)
     .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 })();
 </script>
