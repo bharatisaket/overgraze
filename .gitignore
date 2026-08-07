@@ -1,8 +1,4 @@
-# This repo lives inside the Downloads folder, which holds ~1500 unrelated
-# files. Default to ignoring everything and opt files in explicitly, so nothing
-# gets committed by accident.
-*
-
-# Tracked files (add a line per file you actually want in the repo).
-!.gitignore
-!compare.py
+__pycache__/
+*.py[cod]
+.venv/
+venv/
