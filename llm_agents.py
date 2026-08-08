@@ -198,6 +198,8 @@ class Agent:
     budget: Budget
     trace: "Trace"
     shape: dict = field(default_factory=dict)
+    horizon: str = "true"
+    total_ticks: int = 0
     dry_run: bool = False
 
     session: ClientSession | None = None
@@ -220,9 +222,35 @@ class Agent:
                     return {"text": text}
         return {}
 
+    def apply_horizon(self, status: dict) -> dict:
+        """How much of the future the agent is allowed to know.
+
+        This is a treatment, not a display detail. A commons game with a known
+        last tick unravels by backward induction -- there is no future left to
+        protect on the final tick, so defection is dominant there, and the
+        reasoning propagates backwards. An indefinite horizon is what makes
+        cooperation sustainable at all, which is why Axelrod's tournaments hid
+        the endpoint. The first real run priced its one pivot to cooperation
+        explicitly against `0.4 x 97 = 38.8 future harvest`, so this number
+        drives behaviour and cannot be left to chance.
+
+        `world` reports the engine's 100-tick cap regardless of how many ticks
+        actually run -- the original behaviour, and a precise falsehood whenever
+        --ticks disagrees with it. Kept only to reproduce earlier runs.
+        """
+        if self.horizon == "world":
+            return status
+        status = dict(status)
+        if self.horizon == "hidden":
+            status.pop("ticks_remaining", None)
+        else:
+            status["ticks_remaining"] = max(
+                0, self.total_ticks - status.get("tick", 0))
+        return status
+
     async def observe(self) -> dict:
         """The free reads. None of these consume a tick."""
-        status = await self.call("get_status")
+        status = self.apply_horizon(await self.call("get_status"))
         view = await self.call("look_around")
         heard = await self.call("listen_for_messages", since_tick=self.last_heard_tick)
         past = await self.call("get_history", window=8)
@@ -387,13 +415,15 @@ async def run(args) -> int:
     agents = [Agent(name=n, disposition=n, token=t,
                     url=f"http://127.0.0.1:{args.port}/mcp",
                     model=args.model, effort=args.effort, budget=budget,
-                    trace=trace, shape=shape, dry_run=args.dry_run)
+                    trace=trace, shape=shape, horizon=args.horizon,
+                    total_ticks=args.ticks, dry_run=args.dry_run)
               for n, t in info["tokens"].items()]
     # The thinking shape is recorded because it is not cosmetic: it changes how
     # much the model deliberates per tick, so runs are only comparable within it.
     trace.write({"type": "run", "run_id": info["run_id"], "seats": seats,
                  "model": args.model, "effort": args.effort, "seed": args.seed,
                  "thinking": shape.get("thinking"),
+                 "horizon": args.horizon, "ticks": args.ticks,
                  "r": args.r, "monitoring": args.monitoring,
                  "punish": args.punish, "chat": not args.no_chat})
 
@@ -423,6 +453,12 @@ async def run(args) -> int:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="run language-model foragers")
     p.add_argument("--model", default=DEFAULT_MODEL)
+    p.add_argument("--horizon", choices=["true", "hidden", "world"],
+                   default="true",
+                   help="how much of the future agents see. true: ticks left "
+                        "in this run. hidden: no count at all, the Axelrod "
+                        "condition. world: the engine's 100-tick cap whatever "
+                        "--ticks says, which is what the first run did")
     p.add_argument("--think-budget", type=int, default=THINK_BUDGET,
                    help="tokens of extended thinking per decision; 0 is off "
                         "and is the default because thinking was 72%% of the "
