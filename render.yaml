@@ -1,19 +1,30 @@
-# Render blueprint. TLS and the public hostname are Render's job.
+# Render blueprint -- native Python, no Docker needed.
+#
+# Render installs requirements.txt and runs the start command; the app reads
+# PORT from the environment and binds 0.0.0.0 when it is set. If you would
+# rather ship the container, set `runtime: docker` and delete the build/start
+# commands -- the Dockerfile is equivalent and is what Fly uses.
 services:
   - type: web
     name: overgraze
-    runtime: docker
-    plan: starter          # a paid plan: the free tier sleeps, and a sleeping
-                           # server strands every agent mid-run
-    numInstances: 1        # the tick barrier is in-process -- see Dockerfile
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    plan: starter          # NOT free: the free tier sleeps after 15 minutes of
+                           # inactivity, and a sleeping server strands every
+                           # agent waiting at the tick barrier. It also has no
+                           # persistent disk.
+    numInstances: 1        # the tick barrier is in-process -- see the README
     healthCheckPath: /healthz
     envVars:
       - key: OVERGRAZE_DB
         value: /data/overgraze.db
       - key: OVERGRAZE_ADMIN_TOKEN
-        generateValue: true
+        generateValue: true      # Render mints it; read it from the dashboard
       - key: OVERGRAZE_RATE
         value: "120"
+      - key: PYTHON_VERSION
+        value: "3.11.9"
     disk:
       name: overgraze-data
       mountPath: /data
