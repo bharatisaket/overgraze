@@ -168,8 +168,47 @@ def tolerant(state, agent, rng, memory) -> list[Action]:
     return _conditional(state, agent, rng, memory, TOLERANT_EVIDENCE, 0.0)
 
 
+def sanctioner(state: State, agent, rng, memory) -> list[Action]:
+    """Restrain always, and fine visible offenders instead of out-harvesting them.
+
+    Reciprocity in this world retaliates the only way it can -- by harvesting
+    harder -- which protects the individual and destroys the commons: against
+    two defectors it cuts survival from 59 ticks to 27 and takes collapse from
+    55% to 100%. You punish by consuming the thing you are defending.
+
+    A sanction breaks that. It costs the punisher PUNISH_COST and the offender
+    PUNISH_FINE, both in score, and takes nothing from the ground. This is
+    Fehr and Gaechter's costly punishment rather than Axelrod's tit-for-tat,
+    and it carries their second-order free-rider problem with it: a plain
+    cautious agent enjoys the deterrence without ever paying for it.
+    """
+    if not state.punish:
+        return cautious(state, agent, rng, memory)
+
+    led = ledger(state, agent.id, window=RECIPROCAL_WINDOW * 4)
+    since = state.tick - RECIPROCAL_WINDOW
+    offences: dict[int, int] = {}
+    for row in led["witnessed"]:
+        if row["tick"] >= since and row["over_took"] and row["agent"] is not None:
+            offences[row["agent"]] = offences.get(row["agent"], 0) + 1
+
+    if offences:
+        # only somebody standing within reach can be fined
+        reachable_now = {o.id for o in state.agents
+                         if o.id != agent.id
+                         and max(abs(o.y - agent.y), abs(o.x - agent.x)) <= state.vision}
+        targets = [a for a, n in sorted(offences.items(), key=lambda kv: -kv[1])
+                   if a in reachable_now]
+        if targets:
+            memory["fines_issued"] = memory.get("fines_issued", 0) + 1
+            return [Action(agent.id, "punish", subject=targets[0])]
+
+    return cautious(state, agent, rng, memory)
+
+
 POLICIES = {"greedy": greedy, "cautious": cautious, "random": random_walk,
-            "reciprocal": reciprocal, "generous": generous, "tolerant": tolerant}
+            "reciprocal": reciprocal, "generous": generous, "tolerant": tolerant,
+            "sanctioner": sanctioner}
 
 MIXES = {
     "greedy":   ["greedy"] * 4,
@@ -181,6 +220,8 @@ MIXES = {
     "caut_v_greedy":  ["cautious", "cautious", "greedy", "greedy"],
     "generous":       ["generous"] * 4,
     "gen_v_greedy":   ["generous", "generous", "greedy", "greedy"],
+    "sanctioner":     ["sanctioner"] * 4,
+    "sanc_v_greedy":  ["sanctioner", "sanctioner", "greedy", "greedy"],
 }
 
 

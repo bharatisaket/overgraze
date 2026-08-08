@@ -56,7 +56,8 @@ def make_groups(pop: list[str], assort: float, rng) -> list[list[int]]:
 
 
 def generation(pop: list[str], rule: str, r: float, monitoring: str,
-               noise: float, assort: float, rng, misreport: float = 0.0) -> tuple[list[float], dict]:
+               noise: float, assort: float, rng, misreport: float = 0.0,
+               punish: bool = False) -> tuple[list[float], dict]:
     """Play one generation. Returns per-individual payoff and some diagnostics."""
     fitness = [0.0] * len(pop)
     survived, collapses, episodes = 0.0, 0, 0
@@ -64,7 +65,7 @@ def generation(pop: list[str], rule: str, r: float, monitoring: str,
         kinds = [pop[i] for i in group]
         ep = harness.run_episode(int(rng.integers(1 << 30)), kinds, rule, r,
                                  monitoring=monitoring, noise=noise,
-                                 misreport=misreport)
+                                 misreport=misreport, punish=punish)
         for slot, i in enumerate(group):
             fitness[i] = ep.scores[slot]
         survived += ep.survived
@@ -84,7 +85,7 @@ def reproduce(pop: list[str], fitness: list[float], rng) -> list[str]:
 def run(start: dict[str, int], generations: int, seed: int = 0,
         rule: str = "global", r: float | None = None, monitoring: str = "local",
         noise: float = 0.0, assort: float = 0.0, verbose: bool = False,
-        misreport: float = 0.0):
+        misreport: float = 0.0, punish: bool = False):
     r = harness.TUNED_R if r is None else r
     rng = np.random.default_rng(seed)
     pop = [k for kind, n in start.items() for k in [kind] * n]
@@ -93,7 +94,7 @@ def run(start: dict[str, int], generations: int, seed: int = 0,
 
     for g in range(generations):
         fitness, diag = generation(pop, rule, r, monitoring, noise, assort, rng,
-                                   misreport)
+                                   misreport, punish)
         pop = reproduce(pop, fitness, rng)
         history.append(Counter(pop))
         diags.append(diag)
@@ -172,8 +173,8 @@ def cmd_noise(args) -> int:
     print(f"pop={args.pop} generations={args.generations} assort={args.assort} "
           f"monitoring={args.monitoring} execution-noise={args.noise} "
           f"· {args.seeds} seeds each\n")
-    print(f"{'misreport':<11}{'strategy':<13}{'share':<20}{'commons':<16}{'retaliating'}")
-    print("-" * 74)
+    print(f"{'misreport':<11}{'strategy':<13}{'outcome over seeds':<26}{'commons':<14}{'mean'}")
+    print("-" * 82)
     table = {}
     for mis in (0.0, 0.05, 0.10, 0.20):
         for strat in strategies:
@@ -186,21 +187,24 @@ def cmd_noise(args) -> int:
                 ends.append(hist[-1].get(strat, 0) / args.pop)
                 colls.append(np.mean([d["collapse_rate"] for d in diags]))
             end, coll = float(np.mean(ends)), float(np.mean(colls))
-            sd_end = float(np.std(ends))
-            table[(mis, strat)] = (end, coll)
-            print(f"{mis:<11.2f}{strat:<13}{end * 100:5.1f}% (sd {sd_end * 100:4.1f})   "
-                  f"{coll * 100:3.0f}% collapse    -")
+            # Fixation is bimodal -- a run mostly ends at 0% or 100% -- so the
+            # mean share across seeds averages a coin flip. The probability of
+            # actually taking over is the statistic that means something.
+            fix = float(np.mean([e > 0.95 for e in ends]))
+            died = float(np.mean([e < 0.02 for e in ends]))
+            table[(mis, strat)] = (fix, coll, end)
+            print(f"{mis:<11.2f}{strat:<13}{fix * 100:4.0f}% fixate  {died * 100:3.0f}% die   "
+                  f"{coll * 100:3.0f}% collapse   mean share {end * 100:4.1f}%")
         print()
 
     print("does either kind of forgiveness beat unforgiving reciprocity?")
+    print("(fixation probability, so a difference here is a difference in outcome)")
     for mis in (0.05, 0.10, 0.20):
         base = table[(mis, "reciprocal")]
-        gen = table[(mis, "generous")]
-        tol = table[(mis, "tolerant")]
-        print(f"  misreport {mis:.2f}  generous {gen[0] * 100 - base[0] * 100:+5.1f}pp share "
-              f"{gen[1] * 100 - base[1] * 100:+4.0f}pp collapse   |   "
-              f"tolerant {tol[0] * 100 - base[0] * 100:+5.1f}pp share "
-              f"{tol[1] * 100 - base[1] * 100:+4.0f}pp collapse")
+        for other in strategies[1:]:
+            o = table[(mis, other)]
+            print(f"  misreport {mis:.2f}  {other:<11} {o[0] * 100 - base[0] * 100:+5.0f}pp fixation "
+                  f"{o[1] * 100 - base[1] * 100:+5.0f}pp collapse")
     return 0
 
 
