@@ -43,10 +43,10 @@ other of breaking a pact using pre-pact harvests as evidence, and the pact died
 of it — the same failure the scripted `--noise-scan` produces with a 10%
 misreport rate. Worth checking whether the ledger's presentation invites it.
 
-Next: several seeds at 40 ticks before any of this is called a result. Seed 1
-is done under both horizon conditions; a seed 2 pair was in flight when this
-was written and is not reflected below. The API budget is ~$0.38 after it, so
-further seeds need new funding or a free provider — see the cost note.
+Seeds 1 and 2 are done under both horizon conditions. The API budget is spent
+(~$4.58 of $5), so further seeds need new funding or a free provider — see the
+cost note. Two seeds was exactly enough to kill the prettiest finding, which is
+the argument for funding several more rather than none.
 
 ## Decisions that would otherwise get re-litigated
 
@@ -117,19 +117,38 @@ Traces are gitignored; regenerate with the commands given.
   shadow of the future explicitly.
 - **They negotiate a quantitative norm nobody specified.** The negotiator
   proposed a 0.4/turn cap by tick 0; three agents had signed on by tick 3.
-- **Seeing the end stops them investing in the commons.** 40 ticks, seed 1,
-  the only variable being whether `ticks_remaining` is visible. Plants by
-  phase, early/mid/late: **12/12/5 when the counter is visible, 19/19/23 when
-  it is hidden.** Final commons 29.99 vs 33.20; total harvest 15.91 vs 8.33.
-  Backward induction, showing up in the costly action. **One seed per
-  condition — this is a direction, not a number.**
+- **Seeing the end does *not* visibly change how they invest — that result
+  failed to replicate.** 40 ticks, `--horizon true` vs `hidden`, treatment
+  integrity verified in all four runs. Plants by phase, early/mid/late:
+
+  | | early | mid | late |
+  |---|---|---|---|
+  | seed 1, counter visible | 12 | 12 | 5 |
+  | seed 1, hidden | 19 | 19 | 23 |
+  | seed 2, counter visible | 2 | 6 | 13 |
+  | seed 2, hidden | 3 | 17 | 1 |
+
+  Seed 1 looked like textbook backward induction: investment collapsing as the
+  end approaches, and rising when there is no end in sight. Seed 2 reverses it
+  exactly. Two seeds, opposite directions, so the planting trajectory is noise
+  at this sample size and nothing should be claimed from it. Recorded because
+  the seed-1 pattern was written up as a finding before seed 2 existed, and the
+  temptation to keep it was real.
+
+- **The outcome difference did hold on both seeds, weakly.** Agents shown the
+  countdown ended with a lower commons (29.99 vs 33.20; 30.00 vs 32.67) and
+  took more in total (15.91 vs 8.33; 14.84 vs 10.84). Same direction twice,
+  which is 2 of 2 — about what a coin does one time in four. Suggestive,
+  unpublishable, and the obvious thing to spend the next budget on.
 - **Agents bluff about sanctions they cannot apply.** With `punish` disabled,
   they attempted it anyway (every attempt rejected: `punish is disabled in this
   run`) and then announced sanctions in speech — 3 attempts/7 claims and 5/12
   in the clean pair, 2/6 and 5/23 before it. Peers sometimes believe it and
   adjust; the maximizer once caught it (*"Agent 3 has declared they are
-  punishing me, but punish is disabled"*). Seen in every run so far and
-  independent of the horizon, which makes it the sturdiest result here.
+  punishing me, but punish is disabled"*). Attempts and claims across the four
+  clean runs: 3/7, 5/12, 1/6, 2/5 — **every run, both seeds, both horizon
+  conditions.** It is the only finding here that survived replication, and it
+  was not what any of these runs set out to measure.
 - **A steward can finish below zero.** −0.10 in one run: planting costs the
   planter, so the commons survived partly because one agent paid for it.
 - **Haiku misreads rules under load.** The maximizer at tick 37: *"The collapse
