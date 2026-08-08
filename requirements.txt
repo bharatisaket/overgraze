@@ -1,0 +1,2 @@
+numpy
+mcp>=2.0        # server (mcp.server.mcpserver.MCPServer) and client

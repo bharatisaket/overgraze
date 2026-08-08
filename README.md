@@ -248,6 +248,45 @@ It was replaced rather than repaired, and deleted once `world.py` covered it —
   cells systematically under-regrew. `world.py` divides by the true neighbour
   count.
 
+## The MCP server
+
+A thin shell over `world.py`. The tools identify the caller, call the engine,
+and return what happened; there is no game logic in the protocol layer.
+
+```bash
+pip install -r requirements.txt
+python server.py --new alice bob carol dave     # prints a bearer token per seat
+python server.py                                # serve on 127.0.0.1:8000/mcp
+python play.py --self-test                      # drive a whole run end to end
+```
+
+| tool | costs a tick? |
+|---|---|
+| `look_around`, `get_status`, `listen_for_messages`, `get_history`, `get_ledger` | no |
+| `harvest`, `move`, `plant`, `punish`, `pass_turn` | yes — one per tick |
+| `say` | no — speech is its own channel |
+
+**The awkward part is the tick.** The engine resolves a whole tick at once, but
+MCP calls arrive one agent at a time. So an action is an *intent*: it is written
+down, the caller blocks, and when every seat has committed — or the barrier
+times out and the stragglers are recorded as `noop` — the tick resolves for
+everyone together and each caller is handed the part of the outcome that belongs
+to it. A harvest can therefore return less than it asked for, which is the
+honest answer when somebody else wanted the same cell.
+
+**Nothing lives in an MCP session.** State is in SQLite, keyed by run, and a
+tool call is answerable from a bearer token and the database alone. The
+2026-07-28 spec removed protocol-level sessions, so the server is written as
+though there is none — because there is not. A restart costs an in-flight
+barrier wait, not a run.
+
+**Auth is a bearer token per seat**, mapped to a player row. That is fine for a
+demo over TLS and nothing more. OAuth 2.1 is the production answer.
+
+Errors come back as results rather than protocol faults, because they are things
+an agent has to reason about: *you already acted this tick*, *nothing left in
+this cell*, *that would leave the world*, *that agent is out of range*.
+
 ## Design decisions and known deviations
 
 **Performance is short of target.** The Phase 1 brief wants 1000 runs a second;

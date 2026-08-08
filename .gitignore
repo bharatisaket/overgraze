@@ -10,3 +10,9 @@ overgraze.html
 
 # harness output
 *.csv
+
+# server state
+overgraze.db
+overgraze.db-wal
+overgraze.db-shm
+tokens.json
