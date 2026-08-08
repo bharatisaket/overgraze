@@ -15,9 +15,8 @@ import json
 import base64
 import numpy as np
 
-from compare import Agent, regrow, N, CAP, TICKS, TAKE, R_VALUES
+from compare import Agent, regrow, N, CAP, TICKS, TAKE, R_VALUES, SEEDS
 
-SEEDS = 40        # for the summary statistics
 REPLAY_SEED = 0   # the single run shown in the grid player
 
 MIXES = [

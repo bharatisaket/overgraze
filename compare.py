@@ -21,6 +21,12 @@ TAKE = 0.55  # max an agent can harvest in a single tick
 # copy, so the two scripts always report on the same rates.
 R_VALUES = [0.11, 0.13, 0.15, 0.30, 0.50]
 
+# Seeds averaged over, imported by payoff.py and export_viz.py so every script
+# reports the same estimate of the same quantity. 40 is the count the published
+# visualiser already used; unifying upward means the scripts agree with it
+# rather than the other way round.
+SEEDS = 40
+
 
 def neighbours_mean(g):
     """Average resource level in each cell's 3x3 neighbourhood (including itself).
@@ -177,7 +183,7 @@ for rule in ['global', 'neighbour']:
         for mix, label in [(['greedy']*4, '4 greedy'),
                            (['cautious']*4, '4 cautious'),
                            (['greedy', 'greedy', 'cautious', 'cautious'], '2 greedy / 2 cautious')]:
-            res = [run(rule, r, mix, s) for s in range(12)]
+            res = [run(rule, r, mix, s) for s in range(SEEDS)]
             sv = np.mean([x[0] for x in res])
             hv = np.mean([x[1] for x in res])
             print(f"{rule:<8}{r:<7}{label:<26}{sv:<10.1f}{hv:<10.1f}")

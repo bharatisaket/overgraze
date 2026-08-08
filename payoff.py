@@ -1,5 +1,5 @@
 import numpy as np
-from compare import run, N, CAP, R_VALUES
+from compare import run, N, CAP, R_VALUES, SEEDS
 
 print("MIXED RUNS: does the greedy agent out-earn the cautious one?")
 print(f"{'rule':<11}{'r':<7}{'greedy avg':<13}{'cautious avg':<15}{'survived':<10}{'dilemma?'}")
@@ -7,7 +7,7 @@ print("-"*72)
 mix = ['greedy','greedy','cautious','cautious']
 for rule in ['global','neighbour']:
     for r in R_VALUES:
-        res = [run(rule, r, mix, s) for s in range(20)]
+        res = [run(rule, r, mix, s) for s in range(SEEDS)]
         gs = np.mean([np.mean(x[2][:2]) for x in res])
         cs = np.mean([np.mean(x[2][2:]) for x in res])
         sv = np.mean([x[0] for x in res])
@@ -20,7 +20,7 @@ print(f"{'rule':<11}{'dead cells':<14}{'recovered cells':<18}{'spatial memory?'}
 print("-"*62)
 for rule in ['global','neighbour']:
     deads, recs = [], []
-    for s in range(20):
+    for s in range(SEEDS):
         sv, tot, sc, g = run(rule, 0.15, ['greedy']*4, s)
         deads.append(int((g < 0.05).sum()))
         recs.append(int((g > 0.5).sum()))
