@@ -56,14 +56,45 @@ gitignored.
 
 **Grid.** 6×6 cells, each holding up to `CAP = 1.0`. Starts completely full.
 
-**Foragers.** Four, starting in the four corners. Each tick a forager considers
-staying put plus its four orthogonal neighbours and moves to whichever holds the
-most, breaking ties at random. Then it harvests, up to `TAKE = 0.55` per tick:
+**Foragers.** Four, starting in the four corners.
 
-| kind | takes |
+**A tick.** Every agent submits its intents for tick N; the engine resolves them
+all against the same tick-N snapshot and only then advances. Each agent may
+submit at most one of each, and a second is an error the agent is told about
+(*"you already acted this tick"*) rather than a silent overwrite:
+
+| channel | actions |
 |---|---|
-| `greedy` | `min(cell, TAKE)` — will strip a cell to zero |
-| `cautious` | `min(max(cell - 0.5, 0), TAKE)` — leaves half a cell as seed stock |
+| move | `move(north\|south\|east\|west\|stay)` — resolves first, so a harvest lands on the destination |
+| resource | `harvest(amount)` up to `TAKE = 0.55`, `plant()` adding `0.15`, `punish(agent)`, `noop` |
+| speech | `say(text)` — heard by agents within vision |
+
+Movement and speech are separate channels rather than competing actions, both
+deliberately. Charging a tick for a step halves extraction while leaving
+regrowth untouched — the commons then survives 70–90 ticks even at r = 0.002 and
+restraint never pays, so the dilemma disappears. And if talking cost an agent
+its harvest, the chat-on/chat-off ablation would measure the price of speaking
+rather than the effect of communication.
+
+**Reads are free.** `look()` shows only what is within vision (Chebyshev radius
+1) — cells and nearby agents, not the whole grid. `listen()` returns messages
+spoken in earshot. `status()` reports score, tick, and the run's rules. None of
+them consume a tick.
+
+**Contention.** When several agents harvest one cell, `resolve_cell` splits it
+max-min fair: equal shares, surplus from a small ask flowing back to whoever
+still wants more, never more than asked and never more than the cell holds.
+
+**Ablation switches** live on the state, so a run is fully described by it:
+`chat`, `punish`, `anonymous`, `vision`.
+
+**Scripted policies:**
+
+| kind | behaviour |
+|---|---|
+| `greedy` | step onto the richest cell in reach and strip it, `min(cell, TAKE)` |
+| `cautious` | same step, but never below half — and replant when nothing is spare |
+| `random` | wander, harvest arbitrary amounts, occasionally plant |
 
 **Regrowth**, applied after all foragers have acted, at rate `r`:
 
@@ -79,41 +110,45 @@ most, breaking ties at random. Then it harvests, up to `TAKE = 0.55` per tick:
 **Collapse.** A run stops early if total resource falls below 5% of capacity
 (1.8 of 36). `survived < 100` is the signature of a collapse.
 
-**Randomness.** Two draws, both seeded: movement tie-breaks, and the order
-foragers act in each tick. The activation shuffle matters — acting first means
-harvesting before the others see the cell, and under a fixed order that
-advantage always fell to the two greedy foragers, biasing the very comparison
-this project makes.
+**Randomness.** One seeded draw: which cell a forager picks when several are
+tied. Each agent has its own stream, so the order agents are processed in cannot
+influence a run.
 
 ## Results
 
 From `world.py`, means over 40 seeds. `4G` = four greedy, `4C` = four cautious,
-`2/2` = mixed. "contested" counts cells two or more foragers targeted on the
-same tick — the case the engine has to arbitrate.
+`2/2` = mixed.
 
-| rule | r | survived 4G | harvest 4G | harvest 4C | greedy each (2/2) | cautious each (2/2) | contested | dilemma |
-|---|---|---|---|---|---|---|---|---|
-| global | 0.035 | 34.5 | 41.0 | 49.7 | 16.1 | 6.5 | 56 | **yes** |
-| global | 0.05 | 46.5 | 46.2 | 61.8 | 20.1 | 7.1 | 76 | no |
-| global | 0.08 | 67.6 | 63.6 | 85.6 | 26.1 | 13.4 | 94 | no |
-| global | 0.12 | 100.0 | 107.6 | 111.5 | 35.4 | 21.0 | 115 | no |
-| global | 0.20 | 100.0 | 158.0 | 142.3 | 40.3 | 34.7 | 122 | no |
-| neighbour | 0.035 | 31.9 | 39.8 | 48.9 | 14.3 | 6.8 | 44 | **yes** |
-| neighbour | 0.05 | 42.9 | 44.0 | 59.8 | 17.1 | 7.7 | 66 | **yes** |
-| neighbour | 0.08 | 55.6 | 56.5 | 80.6 | 23.1 | 10.8 | 84 | no |
-| neighbour | 0.12 | 87.6 | 85.5 | 103.9 | 31.2 | 18.1 | 114 | no |
-| neighbour | 0.20 | 100.0 | 147.3 | 136.6 | 39.3 | 31.9 | 118 | no |
+| rule | r | survived 4G | harvest 4G | harvest 4C | greedy each (2/2) | cautious each (2/2) |
+|---|---|---|---|---|---|---|
+| global | 0.02 | 29.1 | 37.8 | **49.3** | 21.7 | 6.1 |
+| global | 0.04 | 39.3 | 42.6 | **60.1** | 26.7 | 7.6 |
+| global | 0.06 | 52.9 | 50.9 | **73.8** | 29.7 | 10.5 |
+| global | 0.10 | 91.4 | 83.4 | **98.7** | 32.8 | 18.9 |
+| global | 0.15 | 100.0 | **135.5** | 119.5 | 37.5 | 27.9 |
+| neighbour | 0.02 | 28.1 | 37.3 | **49.2** | 21.2 | 6.2 |
+| neighbour | 0.04 | 34.4 | 41.0 | **61.3** | 25.3 | 7.7 |
+| neighbour | 0.06 | 48.3 | 47.5 | **72.6** | 27.4 | 10.8 |
+| neighbour | 0.10 | 67.4 | 68.2 | **95.7** | 31.6 | 17.2 |
+| neighbour | 0.15 | 98.3 | 115.4 | **116.0** | 36.0 | 25.1 |
 
-**A greedy forager always out-earns a cautious one.** Across every rate, in
-every mixed group, the individual temptation holds — 2.5× at r = 0.035, still
-1.2× at r = 0.20. Defection is never individually irrational here.
+**The tuned rate is r = 0.04.** It is what Phase 0 asked for: an all-greedy
+group collapses the commons at ~40 ticks, while an all-cautious group survives
+all 100 and out-harvests it, 60.1 to 42.6. `harness.TUNED_R` holds it and the
+CLI defaults to it.
 
-**The collective picture flips at r ≈ 0.12–0.20.** Below it a group of cautious
-foragers out-harvests a group of greedy ones (49.7 vs 41.0 at r = 0.035); above
-it regrowth outruns extraction and greedy wins outright (158.0 vs 142.3 at
-r = 0.20). Only where both conditions hold at once — the greedy advantage *and*
-a collapsing commons — is this a dilemma: `global` at 0.035, and `neighbour` at
-0.035 and 0.05.
+**A greedy forager always out-earns a cautious one** in a mixed group — 3.6× at
+r = 0.02, still 1.3× at r = 0.15. Defection is never individually irrational.
+
+**The collective picture flips at r ≈ 0.15.** Below it a group of cautious
+foragers out-harvests a group of greedy ones; at 0.15 regrowth outruns
+extraction and greedy wins outright (135.5 vs 119.5), so there is no dilemma
+left to study.
+
+**Two cooperators are now enough to save the commons.** Unlike the earlier
+engine, mixed groups do not collapse: the cautious pair replant when nothing is
+spare, and `plant()` is a lever the old world did not have. The tragedy shows up
+in the all-greedy runs, not the mixed ones.
 
 **Local regrowth is less forgiving than pooled regrowth.** At the same rate the
 `neighbour` rule collapses sooner and harvests less, because a stripped cell can

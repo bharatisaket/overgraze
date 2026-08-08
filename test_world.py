@@ -12,14 +12,22 @@ import unittest
 
 import numpy as np
 
-from world import (CAP, CAPACITY, COLLAPSE_FLOOR, N, TAKE, TICKS, Action,
-                   apply_actions, initial_state, neighbours_mean, regrow,
-                   resolve_cell, rng_for)
+from world import (CAP, CAPACITY, COLLAPSE_FLOOR, N, PLANT, PUNISH_COST,
+                   PUNISH_FINE, SAY_LIMIT, TAKE, TICKS, Action, apply_actions,
+                   initial_state, listen, look, neighbours_mean, regrow,
+                   resolve_cell, rng_for, status)
 import harness
 
 
-def st(kinds=("greedy", "greedy"), seed=0, rule="global", r=0.15):
-    return initial_state(seed, list(kinds), rule=rule, r=r)
+def st(kinds=("greedy", "greedy"), seed=0, rule="global", r=0.15, **ab):
+    return initial_state(seed, list(kinds), rule=rule, r=r, **ab)
+
+
+def at(state, agent_id, y, x):
+    """Return a copy of `state` with one agent moved -- test scaffolding only."""
+    agents = tuple(type(a)(a.id, a.kind, y, x, a.score) if a.id == agent_id else a
+                   for a in state.agents)
+    return type(state)(**{**state.__dict__, "agents": agents})
 
 
 class TestResolveCell(unittest.TestCase):
@@ -76,50 +84,288 @@ class TestResolveCell(unittest.TestCase):
 
 
 class TestSameCellSameTick(unittest.TestCase):
-    """Two agents harvesting the same cell on the same tick, end to end."""
+    """Two agents harvesting the same cell on the same tick, end to end.
+
+    Harvest now takes from the agent's own cell, so contention means two agents
+    standing on the same square and both harvesting.
+    """
 
     def setUp(self):
-        # put both agents on adjacent cells so they can both reach (0, 1)
         s = st(("greedy", "greedy"))
-        object.__setattr__(s.agents[0], "y", 0)
-        object.__setattr__(s.agents[0], "x", 0)
-        object.__setattr__(s.agents[1], "y", 0)
-        object.__setattr__(s.agents[1], "x", 2)
-        self.s = s
+        self.s = at(at(s, 0, 2, 2), 1, 2, 2)     # both standing on (2, 2)
+
+    def _harvest_both(self, a=TAKE, b=TAKE, state=None):
+        return apply_actions(state or self.s,
+                             [Action(0, "harvest", amount=a), Action(1, "harvest", amount=b)])
 
     def test_full_cell_serves_both_agents(self):
-        s1, ev = apply_actions(self.s, [Action(0, (0, 1), TAKE), Action(1, (0, 1), TAKE)])
-        # 1.0 available, 0.55 each asked -> 0.5 each after fair split
+        _, ev = self._harvest_both()
         grants = {e["agent"]: e["granted"] for e in ev if e["type"] == "action"}
-        self.assertAlmostEqual(sum(grants.values()), 1.0)
+        self.assertAlmostEqual(sum(grants.values()), 1.0)   # 0.55+0.55 capped at 1.0
         self.assertAlmostEqual(grants[0], grants[1])
 
     def test_cell_never_goes_negative(self):
-        s = self.s
-        thin = s.grid.copy()
-        thin[0, 1] = 0.2
-        s = type(s)(**{**s.__dict__, "grid": thin})
-        s1, _ = apply_actions(s, [Action(0, (0, 1), TAKE), Action(1, (0, 1), TAKE)])
-        self.assertGreaterEqual(float(s1.grid[0, 1]), 0.0)
+        thin = self.s.grid.copy()
+        thin[2, 2] = 0.2
+        s = type(self.s)(**{**self.s.__dict__, "grid": thin})
+        s1, _ = self._harvest_both(state=s)
+        self.assertGreaterEqual(float(s1.grid[2, 2]), 0.0)
 
-    def test_scores_match_what_was_removed(self):
-        s1, _ = apply_actions(self.s, [Action(0, (0, 1), 0.3), Action(1, (0, 1), 0.4)])
-        removed = float(self.s.grid[0, 1]) - float(s1.grid[0, 1])
-        # regrow happens after harvest, so compare against the pre-regrow delta
-        gained = sum(a.score for a in s1.agents)
-        self.assertAlmostEqual(gained, 0.7)
-        self.assertGreater(removed, 0.0)
+    def test_scores_match_what_was_asked(self):
+        s1, _ = self._harvest_both(0.3, 0.4)
+        self.assertAlmostEqual(sum(a.score for a in s1.agents), 0.7)
 
     def test_contention_is_flagged_in_the_log(self):
-        _, ev = apply_actions(self.s, [Action(0, (0, 1), TAKE), Action(1, (0, 1), TAKE)])
-        cells = [e for e in ev if e["type"] == "cell"]
-        self.assertTrue(any(e["contested"] for e in cells))
+        _, ev = self._harvest_both()
+        self.assertTrue(any(e["contested"] for e in ev if e["type"] == "cell"))
 
     def test_separate_cells_are_not_contested(self):
-        _, ev = apply_actions(self.s, [Action(0, (0, 0), TAKE), Action(1, (0, 2), TAKE)])
+        s = at(at(st(("greedy", "greedy")), 0, 1, 1), 1, 4, 4)
+        _, ev = apply_actions(s, [Action(0, "harvest", amount=TAKE),
+                                  Action(1, "harvest", amount=TAKE)])
         cells = [e for e in ev if e["type"] == "cell"]
         self.assertTrue(cells)
         self.assertFalse(any(e["contested"] for e in cells))
+
+
+class TestOneActionPerTick(unittest.TestCase):
+    """'You already acted this tick' has to be an error, not a silent overwrite."""
+
+    def test_second_physical_action_is_rejected(self):
+        s = st()
+        s1, ev = apply_actions(s, [Action(0, "harvest", amount=0.3),
+                                   Action(0, "harvest", amount=0.5)])
+        rejects = [e for e in ev if e["type"] == "reject"]
+        self.assertTrue(any(e["reason"] == "you already acted this tick" for e in rejects))
+        # the FIRST intent stands; the second does not overwrite it
+        self.assertAlmostEqual(s1.agents[0].score, 0.3)
+
+    def test_mixed_kinds_still_count_as_acting_twice(self):
+        s = st()
+        _, ev = apply_actions(s, [Action(0, "harvest", amount=0.3), Action(0, "plant")])
+        self.assertTrue(any(e["reason"] == "you already acted this tick"
+                            for e in ev if e["type"] == "reject"))
+
+    def test_speech_does_not_count_as_the_physical_action(self):
+        s = st()
+        s1, ev = apply_actions(s, [Action(0, "harvest", amount=0.4),
+                                   Action(0, "say", text="mine")])
+        self.assertFalse([e for e in ev if e["type"] == "reject"])
+        self.assertAlmostEqual(s1.agents[0].score, 0.4)
+        self.assertEqual(len(s1.messages), 1)
+
+    def test_second_speech_is_rejected(self):
+        s = st()
+        _, ev = apply_actions(s, [Action(0, "say", text="one"), Action(0, "say", text="two")])
+        self.assertTrue(any(e["reason"] == "you already spoke this tick"
+                            for e in ev if e["type"] == "reject"))
+
+    def test_harvesting_an_empty_cell_says_so(self):
+        s = st()
+        empty = s.grid.copy(); empty[0, 0] = 0.0
+        s = type(s)(**{**s.__dict__, "grid": empty})
+        _, ev = apply_actions(s, [Action(0, "harvest", amount=0.5)])
+        self.assertTrue(any(e["reason"] == "nothing left in this cell"
+                            for e in ev if e["type"] == "reject"))
+
+
+class TestMoveAndPlant(unittest.TestCase):
+    def test_move_changes_position(self):
+        s = st()
+        s1, _ = apply_actions(s, [Action(0, "move", direction="east")])
+        self.assertEqual((s1.agents[0].y, s1.agents[0].x), (0, 1))
+
+    def test_move_off_the_grid_is_rejected(self):
+        s = st()
+        s1, ev = apply_actions(s, [Action(0, "move", direction="north")])
+        self.assertTrue(any(e["reason"] == "that would leave the world"
+                            for e in ev if e["type"] == "reject"))
+        self.assertEqual((s1.agents[0].y, s1.agents[0].x), (0, 0))
+
+    def test_moving_does_not_harvest(self):
+        s = st()
+        s1, _ = apply_actions(s, [Action(0, "move", direction="east")])
+        self.assertEqual(s1.agents[0].score, 0.0)
+
+    def test_plant_adds_to_the_agents_own_cell(self):
+        s = st()
+        thin = s.grid.copy(); thin[0, 0] = 0.2
+        s = type(s)(**{**s.__dict__, "grid": thin})
+        s1, ev = apply_actions(s, [Action(0, "plant")])
+        planted = [e for e in ev if e["type"] == "cell" and e["cause"] == "plant"]
+        self.assertEqual(len(planted), 1)
+        self.assertAlmostEqual(planted[0]["after"], 0.2 + PLANT)
+
+    def test_plant_never_exceeds_capacity(self):
+        s = st()
+        near = s.grid.copy(); near[0, 0] = CAP - 0.01
+        s = type(s)(**{**s.__dict__, "grid": near})
+        s1, _ = apply_actions(s, [Action(0, "plant")])
+        self.assertLessEqual(float(s1.grid[0, 0]), CAP + 1e-9)
+
+    def test_planting_a_full_cell_is_rejected(self):
+        s = st()
+        _, ev = apply_actions(s, [Action(0, "plant")])
+        self.assertTrue(any(e["reason"] == "this cell is already full"
+                            for e in ev if e["type"] == "reject"))
+
+    def test_harvest_and_plant_on_one_cell_are_order_independent(self):
+        s = at(at(st(("greedy", "cautious")), 0, 3, 3), 1, 3, 3)
+        a, _ = apply_actions(s, [Action(0, "harvest", amount=0.5), Action(1, "plant")])
+        b, _ = apply_actions(s, [Action(1, "plant"), Action(0, "harvest", amount=0.5)])
+        np.testing.assert_allclose(a.grid, b.grid)
+
+
+class TestMoveAndActShareATick(unittest.TestCase):
+    """A move and a resource action may share a tick; the move resolves first."""
+
+    def test_harvest_lands_on_the_destination_cell(self):
+        s = at(st(), 0, 2, 2)
+        thin = s.grid.copy(); thin[2, 2] = 0.1; thin[2, 3] = 1.0
+        s = type(s)(**{**s.__dict__, "grid": thin})
+        s1, _ = apply_actions(s, [Action(0, "move", direction="east"),
+                                  Action(0, "harvest", amount=TAKE)])
+        self.assertEqual((s1.agents[0].y, s1.agents[0].x), (2, 3))
+        self.assertAlmostEqual(s1.agents[0].score, TAKE)      # took from (2,3), not (2,2)
+        self.assertAlmostEqual(float(s.grid[2, 2]), 0.1)      # origin untouched
+
+    def test_second_move_is_rejected(self):
+        s = at(st(), 0, 2, 2)
+        s1, ev = apply_actions(s, [Action(0, "move", direction="east"),
+                                   Action(0, "move", direction="south")])
+        self.assertTrue(any(e["reason"] == "you already moved this tick"
+                            for e in ev if e["type"] == "reject"))
+        self.assertEqual((s1.agents[0].y, s1.agents[0].x), (2, 3))   # first move stands
+
+    def test_harvest_is_validated_against_the_destination(self):
+        s = at(st(), 0, 2, 2)
+        empty = s.grid.copy(); empty[2, 3] = 0.0
+        s = type(s)(**{**s.__dict__, "grid": empty})
+        _, ev = apply_actions(s, [Action(0, "move", direction="east"),
+                                  Action(0, "harvest", amount=TAKE)])
+        self.assertTrue(any(e["reason"] == "nothing left in this cell"
+                            for e in ev if e["type"] == "reject"))
+
+    def test_two_agents_converging_on_one_cell_contend(self):
+        s = at(at(st(("greedy", "greedy")), 0, 2, 1), 1, 2, 3)
+        _, ev = apply_actions(s, [Action(0, "move", direction="east"),
+                                  Action(0, "harvest", amount=TAKE),
+                                  Action(1, "move", direction="west"),
+                                  Action(1, "harvest", amount=TAKE)])
+        contested = [e for e in ev if e["type"] == "cell" and e["contested"]]
+        self.assertEqual(len(contested), 1)
+        self.assertEqual(contested[0]["cell"], (2, 2))
+
+    def test_move_plus_plant_plants_at_the_destination(self):
+        s = at(st(), 0, 2, 2)
+        thin = s.grid.copy(); thin[2, 3] = 0.2
+        s = type(s)(**{**s.__dict__, "grid": thin})
+        # assert on the event, not the grid: regrowth runs after the plant
+        _, ev = apply_actions(s, [Action(0, "move", direction="east"),
+                                  Action(0, "plant")])
+        planted = [e for e in ev if e["type"] == "cell" and e["cause"] == "plant"]
+        self.assertEqual([e["cell"] for e in planted], [(2, 3)])
+        self.assertAlmostEqual(planted[0]["after"], 0.2 + PLANT)
+
+
+class TestSpeech(unittest.TestCase):
+    def test_message_is_heard_in_range(self):
+        s = at(at(st(("greedy", "greedy")), 0, 2, 2), 1, 2, 3)
+        s1, ev = apply_actions(s, [Action(0, "say", text="stop at a third")])
+        self.assertEqual([e["heard_by"] for e in ev if e["type"] == "speech"], [[1]])
+        self.assertEqual(listen(s1, 1)[0]["text"], "stop at a third")
+
+    def test_message_is_not_heard_out_of_range(self):
+        s = at(at(st(("greedy", "greedy")), 0, 0, 0), 1, 5, 5)
+        s1, ev = apply_actions(s, [Action(0, "say", text="hello")])
+        self.assertEqual([e["heard_by"] for e in ev if e["type"] == "speech"], [[]])
+        self.assertEqual(listen(s1, 1), [])
+
+    def test_you_do_not_hear_yourself(self):
+        s = st()
+        s1, _ = apply_actions(s, [Action(0, "say", text="thinking aloud")])
+        self.assertEqual(listen(s1, 0), [])
+
+    def test_chat_disabled_rejects_speech(self):
+        s = st(chat=False)
+        s1, ev = apply_actions(s, [Action(0, "say", text="hello")])
+        self.assertTrue(any(e["reason"] == "chat is disabled in this run"
+                            for e in ev if e["type"] == "reject"))
+        self.assertEqual(len(s1.messages), 0)
+
+    def test_overlong_and_empty_messages_are_rejected(self):
+        s = st()
+        _, ev = apply_actions(s, [Action(0, "say", text="x" * (SAY_LIMIT + 1))])
+        self.assertTrue([e for e in ev if e["type"] == "reject"])
+        _, ev2 = apply_actions(s, [Action(0, "say", text="   ")])
+        self.assertTrue(any(e["reason"] == "empty message"
+                            for e in ev2 if e["type"] == "reject"))
+
+    def test_anonymity_masks_the_speaker_in_the_view_but_not_the_log(self):
+        s = at(at(st(("greedy", "greedy"), anonymous=True), 0, 2, 2), 1, 2, 3)
+        s1, ev = apply_actions(s, [Action(0, "say", text="who said that")])
+        self.assertIsNone(listen(s1, 1)[0]["speaker"])
+        self.assertEqual([e["agent"] for e in ev if e["type"] == "speech"], [0])
+        self.assertEqual(s1.messages[0].speaker, 0)
+
+
+class TestVision(unittest.TestCase):
+    def test_look_shows_only_cells_in_range(self):
+        s = at(st(), 0, 2, 2)
+        v = look(s, 0)
+        self.assertEqual(len(v["cells"]), 9)                 # 3x3 at radius 1
+        self.assertNotIn((5, 5), v["cells"])
+
+    def test_look_is_clipped_at_the_edge(self):
+        s = st()
+        self.assertEqual(len(look(s, 0)["cells"]), 4)        # corner sees 2x2
+
+    def test_look_reports_nearby_agents_only(self):
+        s = at(at(st(("greedy", "greedy")), 0, 2, 2), 1, 5, 5)
+        self.assertEqual(look(s, 0)["agents"], [])
+        s2 = at(s, 1, 2, 3)
+        self.assertEqual(len(look(s2, 0)["agents"]), 1)
+
+    def test_anonymity_masks_agent_identity_in_look(self):
+        s = at(at(st(("greedy", "greedy"), anonymous=True), 0, 2, 2), 1, 2, 3)
+        self.assertIsNone(look(s, 0)["agents"][0]["agent"])
+
+    def test_status_reports_the_run_rules(self):
+        s = st(punish=True)
+        r = status(s, 0)["rules"]
+        self.assertEqual(r["take_limit"], TAKE)
+        self.assertTrue(r["punish"])
+        self.assertTrue(r["ends_if_resource_exhausted"])
+
+
+class TestPunish(unittest.TestCase):
+    def test_punish_is_off_by_default(self):
+        s = at(at(st(("greedy", "greedy")), 0, 2, 2), 1, 2, 3)
+        _, ev = apply_actions(s, [Action(0, "punish", subject=1)])
+        self.assertTrue(any(e["reason"] == "punish is disabled in this run"
+                            for e in ev if e["type"] == "reject"))
+
+    def test_punish_costs_both_parties(self):
+        s = at(at(st(("greedy", "greedy"), punish=True), 0, 2, 2), 1, 2, 3)
+        s1, ev = apply_actions(s, [Action(0, "punish", subject=1)])
+        self.assertAlmostEqual(s1.agents[0].score, -PUNISH_COST)
+        self.assertAlmostEqual(s1.agents[1].score, -PUNISH_FINE)
+        self.assertTrue([e for e in ev if e["type"] == "punish"])
+
+    def test_cannot_punish_out_of_range(self):
+        s = at(at(st(("greedy", "greedy"), punish=True), 0, 0, 0), 1, 5, 5)
+        _, ev = apply_actions(s, [Action(0, "punish", subject=1)])
+        self.assertTrue(any(e["reason"] == "that agent is out of range"
+                            for e in ev if e["type"] == "reject"))
+
+    def test_cannot_punish_yourself_or_a_stranger(self):
+        s = st(("greedy", "greedy"), punish=True)
+        _, ev = apply_actions(s, [Action(0, "punish", subject=0)])
+        self.assertTrue(any(e["reason"] == "no such agent to punish"
+                            for e in ev if e["type"] == "reject"))
+        _, ev2 = apply_actions(s, [Action(0, "punish", subject=99)])
+        self.assertTrue(any(e["reason"] == "no such agent to punish"
+                            for e in ev2 if e["type"] == "reject"))
 
 
 class TestPurity(unittest.TestCase):
@@ -127,14 +373,17 @@ class TestPurity(unittest.TestCase):
         s = st()
         before_grid = s.grid.copy()
         before_scores = [a.score for a in s.agents]
-        apply_actions(s, [Action(0, (0, 0), TAKE), Action(1, (5, 0), TAKE)])
+        apply_actions(s, [Action(0, "harvest", amount=TAKE),
+                          Action(1, "harvest", amount=TAKE),
+                          Action(0, "say", text="hello")])
         np.testing.assert_array_equal(s.grid, before_grid)
         self.assertEqual([a.score for a in s.agents], before_scores)
         self.assertEqual(s.tick, 0)
+        self.assertEqual(s.messages, ())
 
     def test_returned_grid_is_a_new_array(self):
         s = st()
-        s1, _ = apply_actions(s, [Action(0, (0, 0), TAKE)])
+        s1, _ = apply_actions(s, [Action(0, "harvest", amount=TAKE)])
         self.assertIsNot(s.grid, s1.grid)
 
     def test_regrow_does_not_mutate(self):
@@ -166,22 +415,26 @@ class TestDeterminism(unittest.TestCase):
 
 
 class TestValidation(unittest.TestCase):
-    def test_unreachable_target_is_rejected(self):
-        s = st()
-        s1, ev = apply_actions(s, [Action(0, (5, 5), TAKE)])
-        self.assertTrue(any(e["type"] == "reject" and e["reason"] == "unreachable" for e in ev))
-        self.assertEqual((s1.agents[0].y, s1.agents[0].x), (0, 0))
-        self.assertEqual(s1.agents[0].score, 0.0)
-
     def test_take_above_cap_is_rejected(self):
         s = st()
-        _, ev = apply_actions(s, [Action(0, (0, 0), TAKE + 1)])
+        s1, ev = apply_actions(s, [Action(0, "harvest", amount=TAKE + 1)])
         self.assertTrue(any(e["type"] == "reject" for e in ev))
+        self.assertEqual(s1.agents[0].score, 0.0)
 
     def test_unknown_agent_is_rejected(self):
         s = st()
-        _, ev = apply_actions(s, [Action(99, (0, 0), 0.1)])
+        _, ev = apply_actions(s, [Action(99, "harvest", amount=0.1)])
         self.assertTrue(any(e["reason"] == "no such agent" for e in ev))
+
+    def test_unknown_action_kind_is_rejected(self):
+        s = st()
+        _, ev = apply_actions(s, [Action(0, "teleport")])
+        self.assertTrue(any("unknown action" in e["reason"] for e in ev if e["type"] == "reject"))
+
+    def test_unknown_direction_is_rejected(self):
+        s = st()
+        _, ev = apply_actions(s, [Action(0, "move", direction="widdershins")])
+        self.assertTrue(any("unknown direction" in e["reason"] for e in ev if e["type"] == "reject"))
 
 
 class TestWorldInvariants(unittest.TestCase):

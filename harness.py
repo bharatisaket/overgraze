@@ -20,37 +20,83 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from world import (Action, State, TAKE, TICKS, apply_actions, initial_state,
-                   reachable, rng_for)
+from world import (CAP, DIRECTIONS, N, TAKE, TICKS, Action, State,
+                   apply_actions, initial_state, rng_for)
 
 # ── policies: (state, agent, rng) -> Action ───────────────────────────────────
-def _best_cells(state: State, agent) -> list[tuple[int, int]]:
-    cells = reachable(agent)
-    best = max(state.grid[c] for c in cells)
-    return [c for c in cells if state.grid[c] == best]
+# Movement now costs a whole tick, so each policy has to decide whether standing
+# still and harvesting beats walking somewhere better. These stay deliberately
+# dumb: they exist to make the world cheap to tune and test.
+
+def _reachable_best(state: State, agent, rng):
+    """Richest cell one step away (or underfoot), ties broken at random."""
+    cells = [(agent.y + dy, agent.x + dx) for dy, dx in
+             ((0, 0), (0, 1), (0, -1), (1, 0), (-1, 0))
+             if 0 <= agent.y + dy < N and 0 <= agent.x + dx < N]
+    best = max(float(state.grid[c]) for c in cells)
+    tied = [c for c in cells if float(state.grid[c]) == best]
+    return tuple(tied[rng.integers(len(tied))]), best
 
 
-def greedy(state: State, agent, rng) -> Action:
-    """Move to the richest cell in reach and take as much as allowed."""
-    cells = _best_cells(state, agent)
-    target = tuple(cells[rng.integers(len(cells))])
-    return Action(agent.id, target, min(float(state.grid[target]), TAKE))
+def _go(agent, cell) -> str | None:
+    """Direction that steps from the agent onto `cell`, or None if already there."""
+    dy, dx = cell[0] - agent.y, cell[1] - agent.x
+    for name, (ddy, ddx) in DIRECTIONS.items():
+        if (ddy, ddx) == (dy, dx):
+            return None if name == "stay" else name
+    return None
 
 
-def cautious(state: State, agent, rng) -> Action:
-    """Same move, but never take a cell below half -- leave seed stock."""
-    cells = _best_cells(state, agent)
-    target = tuple(cells[rng.integers(len(cells))])
-    cell = float(state.grid[target])
-    return Action(agent.id, target, min(max(cell - 0.5, 0.0), TAKE))
+def greedy(state: State, agent, rng) -> list[Action]:
+    """Step onto the richest cell in reach and strip it."""
+    target, best = _reachable_best(state, agent, rng)
+    acts = []
+    d = _go(agent, target)
+    if d:
+        acts.append(Action(agent.id, "move", direction=d))
+    if best > 0:
+        acts.append(Action(agent.id, "harvest", amount=min(best, TAKE)))
+    elif not acts:
+        acts.append(Action(agent.id, "noop"))
+    return acts
 
 
-def random_walk(state: State, agent, rng) -> Action:
-    """Wander, and take an arbitrary amount of whatever is underfoot."""
-    cells = reachable(agent)
-    target = tuple(cells[rng.integers(len(cells))])
-    cell = float(state.grid[target])
-    return Action(agent.id, target, float(rng.uniform(0.0, 1.0)) * min(cell, TAKE))
+def cautious(state: State, agent, rng) -> list[Action]:
+    """Step onto the richest cell in reach, but never take it below half.
+
+    Where there is nothing spare anywhere nearby, replant instead of stripping.
+    """
+    target, best = _reachable_best(state, agent, rng)
+    acts = []
+    d = _go(agent, target)
+    if d:
+        acts.append(Action(agent.id, "move", direction=d))
+    spare = max(best - 0.5, 0.0)
+    if spare > 0:
+        acts.append(Action(agent.id, "harvest", amount=min(spare, TAKE)))
+    elif best < CAP:
+        acts.append(Action(agent.id, "plant"))
+    elif not acts:
+        acts.append(Action(agent.id, "noop"))
+    return acts
+
+
+def random_walk(state: State, agent, rng) -> list[Action]:
+    """Wander and act arbitrarily."""
+    acts = []
+    names = [d for d in DIRECTIONS if d != "stay"]
+    if rng.random() < 0.6:
+        acts.append(Action(agent.id, "move", direction=names[rng.integers(len(names))]))
+    here = float(state.grid[agent.y, agent.x])
+    roll = rng.random()
+    if roll < 0.5 and here > 0:
+        acts.append(Action(agent.id, "harvest",
+                           amount=float(rng.uniform(0, 1)) * min(here, TAKE)))
+    elif roll < 0.7 and here < CAP:
+        acts.append(Action(agent.id, "plant"))
+    if not acts:
+        acts.append(Action(agent.id, "noop"))
+    return acts
 
 
 POLICIES = {"greedy": greedy, "cautious": cautious, "random": random_walk}
@@ -64,11 +110,16 @@ MIXES = {
 
 
 # ── episode runner ────────────────────────────────────────────────────────────
-# Regrowth rates the visualiser sweeps. Chosen from `--sweep` against the
-# scripted agents: 0.035-0.12 is the band where greedy collapses and cautious
-# survives, and 0.20 sits past it so the charts show both sides of the line.
-SWEEP_R = [0.035, 0.05, 0.08, 0.12, 0.20]
+# Regrowth rates the visualiser sweeps, chosen from `--sweep`: 0.02-0.10 is the
+# band where greedy collapses the commons and cautious survives it, and 0.15
+# sits past the crossover so the charts show both sides of the line.
+SWEEP_R = [0.02, 0.04, 0.06, 0.10, 0.15]
 SEEDS = 40
+
+# Phase 0's tuning target -- "collapse in roughly 40 ticks" -- lands here: an
+# all-greedy group collapses at ~40 ticks under the global rule, while an
+# all-cautious group survives all 100 and out-harvests it 59.9 to 42.4.
+TUNED_R = 0.04
 
 
 @dataclass
@@ -113,7 +164,9 @@ def run_episode(seed: int, mix: str, rule: str = "global", r: float = 0.15,
     cum = [[a.score for a in state.agents]] if keep_frames else None
 
     while not state.done:
-        actions = [POLICIES[a.kind](state, a, streams[a.id]) for a in state.agents]
+        # policies return a list now: a move and a resource action can share a tick
+        actions = [act for a in state.agents
+                   for act in POLICIES[a.kind](state, a, streams[a.id])]
         state, events = apply_actions(state, actions)
         contested += sum(1 for e in events if e["type"] == "cell" and e["contested"])
         stock.append(state.stock)
@@ -190,7 +243,7 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Overgraze scripted-agent harness")
     p.add_argument("--runs", type=int, default=100, help="episodes to run (default 100)")
     p.add_argument("--rule", choices=["global", "neighbour"], default="global")
-    p.add_argument("--r", type=float, default=0.15, help="regrowth rate")
+    p.add_argument("--r", type=float, default=TUNED_R, help="regrowth rate")
     p.add_argument("--mix", choices=sorted(MIXES), default="mixed")
     p.add_argument("--out", default="stock.csv", help="CSV path for stock over time")
     p.add_argument("--sweep", action="store_true",
