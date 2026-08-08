@@ -148,6 +148,12 @@ class State:
     speech_radius: int | None = None        # None = grid-wide broadcast
     share_stock: bool = True                # agents may see the commons total
     monitoring: str = "local"               # 'none' | 'local' | 'global'
+    # Chance a harvest executes at full TAKE regardless of what was asked -- the
+    # trembling hand. A restrained agent occasionally strips a cell by accident,
+    # and no witness can tell that from deliberate greed. This is the condition
+    # under which unforgiving reciprocity spirals: the mistake looks like a
+    # betrayal, the retaliation looks like a betrayal back.
+    noise: float = 0.0
 
     @property
     def stock(self) -> float:
@@ -521,10 +527,22 @@ def apply_actions(state: State, actions: Iterable[Action]) -> tuple[State, list[
         if act.kind == "harvest":
             harvesters.setdefault(destination(aid), []).append(aid)
 
+    # the trembling hand, drawn deterministically so a seed still replays exactly
+    asked: dict[int, float] = {}
+    for aid, act in resource.items():
+        if act.kind != "harvest":
+            continue
+        amount = act.amount
+        if state.noise > 0 and rng_for(state.seed, state.tick, aid).random() < state.noise:
+            amount = TAKE
+            events.append({"t": state.tick, "type": "tremble", "agent": aid,
+                           "intended": act.amount, "executed": amount})
+        asked[aid] = amount
+
     granted: dict[int, float] = {}
     for cell, ids in harvesters.items():
         ids.sort()
-        asks = [min(resource[i].amount, float(state.grid[cell])) for i in ids]
+        asks = [min(asked[i], float(state.grid[cell])) for i in ids]
         for i, g in zip(ids, resolve_cell(float(state.grid[cell]), asks)):
             granted[i] = g
             deltas[i] += g
@@ -561,7 +579,7 @@ def apply_actions(state: State, actions: Iterable[Action]) -> tuple[State, list[
     for aid in sorted(resource):
         events.append({"t": state.tick, "type": "action", "agent": aid,
                        "kind": resource[aid].kind,
-                       "requested": resource[aid].amount,
+                       "requested": asked.get(aid, resource[aid].amount),
                        "granted": granted.get(aid, 0.0)})
 
     # 5. speech -- recorded truthfully; anonymity is applied in listen()

@@ -225,10 +225,12 @@ def agent_streams(seed: int, n: int) -> list[np.random.Generator]:
     return [np.random.default_rng(s) for s in np.random.SeedSequence(seed).spawn(n)]
 
 
-def run_episode(seed: int, mix: str, rule: str = "global", r: float = 0.15,
+def run_episode(seed: int, mix, rule: str = "global", r: float = 0.15,
                 keep_events: bool = False, keep_frames: bool = False,
                 **ablations) -> Episode:
-    kinds = MIXES[mix]
+    # `mix` is a name from MIXES, or an explicit list of kinds (the evolutionary
+    # tournament composes groups that no named mix describes)
+    kinds = MIXES[mix] if isinstance(mix, str) else list(mix)
     state = initial_state(seed, kinds, rule=rule, r=r, **ablations)
     stock = [state.stock]
     log: list[dict] = []
@@ -255,7 +257,9 @@ def run_episode(seed: int, mix: str, rule: str = "global", r: float = 0.15,
             cum.append([a.score for a in state.agents])
 
     survived = state.collapsed_at if state.collapsed_at is not None else TICKS
-    return Episode(seed=seed, rule=rule, r=r, mix=mix, survived=survived,
+    return Episode(seed=seed, rule=rule, r=r,
+                   mix=mix if isinstance(mix, str) else "+".join(kinds),
+                   survived=survived,
                    harvest=sum(a.score for a in state.agents),
                    scores=[a.score for a in state.agents], stock=stock,
                    contested=contested, events=log,
