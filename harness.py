@@ -1,0 +1,187 @@
+"""
+Scripted-agent harness for the Overgraze world engine.
+
+Dumb policies only -- no model calls, so a thousand episodes run in seconds and
+the world can be tuned and tested without spending anything.
+
+CLI:
+    python harness.py --runs 100 --out stock.csv
+    python harness.py --runs 100 --rule neighbour --r 0.15 --mix greedy
+    python harness.py --sweep                     # find where greedy collapses
+                                                  # and cautious survives
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import sys
+from dataclasses import dataclass
+
+import numpy as np
+
+from world import (Action, State, TAKE, TICKS, apply_actions, initial_state,
+                   reachable, rng_for)
+
+# ── policies: (state, agent, rng) -> Action ───────────────────────────────────
+def _best_cells(state: State, agent) -> list[tuple[int, int]]:
+    cells = reachable(agent)
+    best = max(state.grid[c] for c in cells)
+    return [c for c in cells if state.grid[c] == best]
+
+
+def greedy(state: State, agent, rng) -> Action:
+    """Move to the richest cell in reach and take as much as allowed."""
+    cells = _best_cells(state, agent)
+    target = tuple(cells[rng.integers(len(cells))])
+    return Action(agent.id, target, min(float(state.grid[target]), TAKE))
+
+
+def cautious(state: State, agent, rng) -> Action:
+    """Same move, but never take a cell below half -- leave seed stock."""
+    cells = _best_cells(state, agent)
+    target = tuple(cells[rng.integers(len(cells))])
+    cell = float(state.grid[target])
+    return Action(agent.id, target, min(max(cell - 0.5, 0.0), TAKE))
+
+
+def random_walk(state: State, agent, rng) -> Action:
+    """Wander, and take an arbitrary amount of whatever is underfoot."""
+    cells = reachable(agent)
+    target = tuple(cells[rng.integers(len(cells))])
+    cell = float(state.grid[target])
+    return Action(agent.id, target, float(rng.uniform(0.0, 1.0)) * min(cell, TAKE))
+
+
+POLICIES = {"greedy": greedy, "cautious": cautious, "random": random_walk}
+
+MIXES = {
+    "greedy":   ["greedy"] * 4,
+    "cautious": ["cautious"] * 4,
+    "mixed":    ["greedy", "greedy", "cautious", "cautious"],
+    "random":   ["random"] * 4,
+}
+
+
+# ── episode runner ────────────────────────────────────────────────────────────
+@dataclass
+class Episode:
+    seed: int
+    rule: str
+    r: float
+    mix: str
+    survived: int
+    harvest: float
+    scores: list[float]
+    stock: list[float]
+    contested: int
+    events: list[dict]
+
+
+def agent_streams(seed: int, n: int) -> list[np.random.Generator]:
+    """One independent RNG stream per agent, spawned once from the episode seed.
+
+    Each agent draws only from its own stream, so no agent's randomness depends
+    on how many others drew before it -- activation order stays irrelevant, the
+    same property `world.rng_for` gives statelessly. This is the fast path:
+    constructing a Generator per agent per tick was a third of total runtime.
+    """
+    return [np.random.default_rng(s) for s in np.random.SeedSequence(seed).spawn(n)]
+
+
+def run_episode(seed: int, mix: str, rule: str = "global", r: float = 0.15,
+                keep_events: bool = False) -> Episode:
+    kinds = MIXES[mix]
+    state = initial_state(seed, kinds, rule=rule, r=r)
+    stock = [state.stock]
+    log: list[dict] = []
+    contested = 0
+    streams = agent_streams(seed, len(kinds))
+
+    while not state.done:
+        actions = [POLICIES[a.kind](state, a, streams[a.id]) for a in state.agents]
+        state, events = apply_actions(state, actions)
+        contested += sum(1 for e in events if e["type"] == "cell" and e["contested"])
+        stock.append(state.stock)
+        if keep_events:
+            log.extend(events)
+
+    survived = state.collapsed_at if state.collapsed_at is not None else TICKS
+    return Episode(seed=seed, rule=rule, r=r, mix=mix, survived=survived,
+                   harvest=sum(a.score for a in state.agents),
+                   scores=[a.score for a in state.agents], stock=stock,
+                   contested=contested, events=log)
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+def cmd_runs(args) -> int:
+    eps = [run_episode(s, args.mix, args.rule, args.r) for s in range(args.runs)]
+
+    with open(args.out, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["run", "seed", "rule", "r", "mix", "tick", "stock"])
+        for i, e in enumerate(eps):
+            for t, s in enumerate(e.stock):
+                w.writerow([i, e.seed, e.rule, e.r, e.mix, t, round(s, 6)])
+
+    surv = np.array([e.survived for e in eps], dtype=float)
+    harv = np.array([e.harvest for e in eps], dtype=float)
+    collapsed = int((surv < TICKS).sum())
+    print(f"{len(eps)} episodes · rule={args.rule} r={args.r} mix={args.mix}")
+    print(f"  survived  mean {surv.mean():6.1f}  sd {surv.std():5.1f}"
+          f"   collapsed in {collapsed}/{len(eps)}")
+    print(f"  harvest   mean {harv.mean():6.1f}  sd {harv.std():5.1f}")
+    print(f"  wrote {sum(len(e.stock) for e in eps)} rows to {args.out}")
+    return 0
+
+
+def cmd_sweep(args) -> int:
+    """Tune regrowth: find r where all-greedy collapses but all-cautious does not."""
+    print("tuning regrowth against scripted agents "
+          f"({args.runs} seeds each, rule={args.rule})")
+    print(f"{'r':<8}{'greedy surv':<14}{'cautious surv':<16}{'greedy harv':<14}"
+          f"{'cautious harv':<15}{'gate'}")
+    print("-" * 78)
+
+    ok = []
+    for r in args.grid:
+        g = [run_episode(s, "greedy", args.rule, r) for s in range(args.runs)]
+        c = [run_episode(s, "cautious", args.rule, r) for s in range(args.runs)]
+        gs = float(np.mean([e.survived for e in g]))
+        cs = float(np.mean([e.survived for e in c]))
+        gh = float(np.mean([e.harvest for e in g]))
+        ch = float(np.mean([e.harvest for e in c]))
+        passes = gs < TICKS and cs >= TICKS
+        if passes:
+            ok.append((r, gs, gh, ch))
+        print(f"{r:<8.3f}{gs:<14.1f}{cs:<16.1f}{gh:<14.1f}{ch:<15.1f}"
+              f"{'PASS' if passes else ''}")
+
+    print()
+    if ok:
+        lo, hi = ok[0][0], ok[-1][0]
+        print(f"gate satisfied for r in [{lo:.3f}, {hi:.3f}] "
+              f"-- greedy collapses, cautious survives all {TICKS} ticks")
+    else:
+        print("no r in this grid satisfies the gate")
+    return 0 if ok else 1
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(description="Overgraze scripted-agent harness")
+    p.add_argument("--runs", type=int, default=100, help="episodes to run (default 100)")
+    p.add_argument("--rule", choices=["global", "neighbour"], default="global")
+    p.add_argument("--r", type=float, default=0.15, help="regrowth rate")
+    p.add_argument("--mix", choices=sorted(MIXES), default="mixed")
+    p.add_argument("--out", default="stock.csv", help="CSV path for stock over time")
+    p.add_argument("--sweep", action="store_true",
+                   help="scan regrowth rates for the tuning gate instead")
+    p.add_argument("--grid", type=float, nargs="+",
+                   default=[0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.15, 0.20, 0.30],
+                   help="regrowth rates to scan with --sweep")
+    args = p.parse_args(argv)
+    return cmd_sweep(args) if args.sweep else cmd_runs(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

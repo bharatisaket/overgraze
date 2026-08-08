@@ -7,3 +7,6 @@ venv/
 #   python export_viz.py && python build_viz.py
 viz_data.json
 overgraze.html
+
+# harness output
+*.csv

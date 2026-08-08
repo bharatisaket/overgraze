@@ -128,6 +128,45 @@ The picture cannot drift from the code.
 
 Published (private): https://claude.ai/code/artifact/3a83f628-6372-451a-aceb-c07c7d6d7559
 
+## Two engines
+
+The project currently contains **two** simulations, and they do not agree.
+
+`compare.py` is the original: agents act sequentially within a tick, mutating
+the grid in place. Everything above — the results table, `payoff.py`, and the
+published visualiser — describes this engine.
+
+`world.py` is the Phase 1 rebuild: a pure library with a simultaneous tick
+model. Agents submit intents, `apply_actions(state, actions) -> state` resolves
+them all against the same tick-N snapshot, and only then advances.
+
+```bash
+python -m unittest test_world -v          # 30 tests
+python harness.py --runs 100 --out stock.csv
+python harness.py --sweep                 # tune regrowth
+```
+
+| | `compare.py` (legacy) | `world.py` (Phase 1) |
+|---|---|---|
+| tick model | sequential, in place | simultaneous intents |
+| same-cell contention | impossible to express | max-min fair split |
+| purity | mutates | returns new state |
+| RNG | shared, order-sensitive | per-agent stream, order-independent |
+| event log | none | append-only, every action and delta |
+| edge regrowth | divides by 9 | divides by true neighbour count |
+| collapse band | r ≈ 0.11–0.13 | r ≈ 0.035–0.12 |
+
+**The regrowth rate does not transfer between them.** Simultaneous choice makes
+foragers pile onto the same rich cell instead of the leader stripping it and the
+rest fanning out, and concentrated damage is far easier for regrowth to repair.
+Retuned against scripted agents, `r ≈ 0.05` reproduces the intended behaviour
+under `world.py`: all-greedy collapses at ~42 ticks, all-cautious survives all
+100, and cautious out-harvests greedy 61.4 to 45.0.
+
+Migrating `compare.py`, the results table, and the visualiser onto `world.py`
+is not done. Until it is, treat the numbers above as describing the legacy
+engine.
+
 ## Design decisions and known deviations
 
 **The tick model is sequential, not simultaneous.** Foragers act one at a time
