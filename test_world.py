@@ -415,6 +415,56 @@ class TestLedger(unittest.TestCase):
                          "joint stripping was blamed on an individual")
 
 
+class TestNoiseIsTwoThings(unittest.TestCase):
+    """Execution error changes the world; perception error changes only beliefs."""
+
+    def both_on(self, cell=(2, 2), **ab):
+        s = st(("cautious", "cautious"), **ab)
+        return at(at(s, 0, *cell), 1, *cell)
+
+    def test_perception_noise_never_touches_the_world(self):
+        """The whole point of the split: misreport must move no resource."""
+        clean = self.both_on(monitoring="global")
+        noisy = self.both_on(monitoring="global", misreport=1.0)
+        acts = [Action(0, "harvest", amount=0.3), Action(1, "harvest", amount=0.3)]
+        a, _ = apply_actions(clean, acts)
+        b, _ = apply_actions(noisy, acts)
+        np.testing.assert_allclose(a.grid, b.grid)
+        self.assertEqual([x.score for x in a.agents], [x.score for x in b.agents])
+
+    def test_execution_noise_does_touch_the_world(self):
+        clean = self.both_on(monitoring="global")
+        noisy = self.both_on(monitoring="global", noise=1.0)
+        acts = [Action(0, "harvest", amount=0.05)]
+        a, _ = apply_actions(clean, acts)
+        b, ev = apply_actions(noisy, acts)
+        self.assertLess(float(b.grid[2, 2]), float(a.grid[2, 2]))
+        self.assertTrue([e for e in ev if e["type"] == "tremble"])
+
+    def test_full_misreport_inverts_what_witnesses_believe(self):
+        s = self.both_on(monitoring="global")
+        acts = [Action(1, "harvest", amount=0.3)]          # restrained, leaves the seed
+        truth, _ = apply_actions(s, acts)
+        self.assertFalse(ledger(truth, 0)["witnessed"][0]["over_took"])
+        lied, _ = apply_actions(self.both_on(monitoring="global", misreport=1.0), acts)
+        self.assertTrue(ledger(lied, 0)["witnessed"][0]["over_took"],
+                        "a restrained neighbour should look guilty under full misreport")
+
+    def test_a_belief_is_stable_across_lookups(self):
+        s = self.both_on(monitoring="global", misreport=0.5)
+        s1, _ = apply_actions(s, [Action(1, "harvest", amount=0.3)])
+        first = [r["over_took"] for r in ledger(s1, 0)["witnessed"]]
+        for _ in range(5):
+            self.assertEqual([r["over_took"] for r in ledger(s1, 0)["witnessed"]], first)
+
+    def test_witnesses_can_disagree_with_each_other(self):
+        """Two observers of one event need not reach the same conclusion."""
+        s = st(("cautious", "cautious", "cautious"), monitoring="global", misreport=0.5)
+        s1, _ = apply_actions(s, [Action(2, "harvest", amount=0.3)])
+        views = {a: [r["over_took"] for r in ledger(s1, a)["witnessed"]] for a in (0, 1)}
+        self.assertEqual(len(views[0]), len(views[1]))     # same events, own readings
+
+
 class TestHistory(unittest.TestCase):
     def test_own_actions_are_recorded(self):
         s = st()

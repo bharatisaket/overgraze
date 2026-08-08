@@ -148,12 +148,19 @@ class State:
     speech_radius: int | None = None        # None = grid-wide broadcast
     share_stock: bool = True                # agents may see the commons total
     monitoring: str = "local"               # 'none' | 'local' | 'global'
-    # Chance a harvest executes at full TAKE regardless of what was asked -- the
-    # trembling hand. A restrained agent occasionally strips a cell by accident,
-    # and no witness can tell that from deliberate greed. This is the condition
-    # under which unforgiving reciprocity spirals: the mistake looks like a
-    # betrayal, the retaliation looks like a betrayal back.
+    # Two kinds of noise, deliberately separate. Conflating them makes the
+    # forgiveness question untestable: a trembling hand both fakes a defection
+    # signal AND really takes more resource, so a collapse cannot be attributed
+    # to retaliation spirals rather than plain over-extraction.
+    #
+    # noise      EXECUTION error -- the hand slips and a harvest goes out at
+    #            full TAKE. Changes the world: the cell really is stripped.
+    # misreport  PERCEPTION error -- a witness reads a restrained harvest as
+    #            greedy, or misses a real grab. Changes nobody's harvest, only
+    #            what observers believe. Any collapse under misreport alone is
+    #            caused by reciprocity misfiring, and nothing else.
     noise: float = 0.0
+    misreport: float = 0.0
 
     @property
     def stock(self) -> float:
@@ -264,6 +271,17 @@ def ledger(state: State, agent_id: int, window: int = 12) -> dict:
     merely outcompeted. That noise is deliberate: it is the condition under
     which unforgiving reciprocity spirals and generous reciprocity wins.
     """
+    def seen_as(tick: int, actor: int, truth: bool) -> bool:
+        """What this witness believes, which is not always what happened.
+
+        Keyed on (seed, tick, actor, witness) so the same observer always reads
+        the same event the same way -- a belief, not a dice roll per lookup.
+        """
+        if state.misreport <= 0:
+            return truth
+        draw = np.random.default_rng([state.seed, tick, actor, agent_id, 7919]).random()
+        return (not truth) if draw < state.misreport else truth
+
     rows = [{"tick": t, "agent": (None if state.anonymous else aid),
              "action": kind, "harvested": round(g, 4),
              "cell": cell, "had": round(before, 4), "left": round(left, 4),
@@ -271,8 +289,8 @@ def ledger(state: State, agent_id: int, window: int = 12) -> dict:
              # Two restrained foragers on one cell can strip it between them
              # without either over-taking -- blaming both for the bare ground is
              # how a monitor turns honest neighbours into enemies.
-             "over_took": (kind == "harvest"
-                           and g > max(before - SEED_LINE, 0.0) + 1e-9)}
+             "over_took": seen_as(t, aid, kind == "harvest"
+                                  and g > max(before - SEED_LINE, 0.0) + 1e-9)}
             for (t, aid, kind, g, cell, before, left, wit) in state.action_log
             if aid != agent_id and agent_id in wit][-window:]
     out = {"window": window, "monitoring": state.monitoring, "witnessed": rows}

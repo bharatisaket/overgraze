@@ -56,14 +56,15 @@ def make_groups(pop: list[str], assort: float, rng) -> list[list[int]]:
 
 
 def generation(pop: list[str], rule: str, r: float, monitoring: str,
-               noise: float, assort: float, rng) -> tuple[list[float], dict]:
+               noise: float, assort: float, rng, misreport: float = 0.0) -> tuple[list[float], dict]:
     """Play one generation. Returns per-individual payoff and some diagnostics."""
     fitness = [0.0] * len(pop)
     survived, collapses, episodes = 0.0, 0, 0
     for group in make_groups(pop, assort, rng):
         kinds = [pop[i] for i in group]
         ep = harness.run_episode(int(rng.integers(1 << 30)), kinds, rule, r,
-                                 monitoring=monitoring, noise=noise)
+                                 monitoring=monitoring, noise=noise,
+                                 misreport=misreport)
         for slot, i in enumerate(group):
             fitness[i] = ep.scores[slot]
         survived += ep.survived
@@ -82,7 +83,8 @@ def reproduce(pop: list[str], fitness: list[float], rng) -> list[str]:
 
 def run(start: dict[str, int], generations: int, seed: int = 0,
         rule: str = "global", r: float | None = None, monitoring: str = "local",
-        noise: float = 0.0, assort: float = 0.0, verbose: bool = False):
+        noise: float = 0.0, assort: float = 0.0, verbose: bool = False,
+        misreport: float = 0.0):
     r = harness.TUNED_R if r is None else r
     rng = np.random.default_rng(seed)
     pop = [k for kind, n in start.items() for k in [kind] * n]
@@ -90,7 +92,8 @@ def run(start: dict[str, int], generations: int, seed: int = 0,
     diags = []
 
     for g in range(generations):
-        fitness, diag = generation(pop, rule, r, monitoring, noise, assort, rng)
+        fitness, diag = generation(pop, rule, r, monitoring, noise, assort, rng,
+                                   misreport)
         pop = reproduce(pop, fitness, rng)
         history.append(Counter(pop))
         diags.append(diag)
@@ -123,7 +126,8 @@ def cmd_invasion(args) -> int:
     print(f"rule={args.rule} r={args.r or harness.TUNED_R} monitoring={args.monitoring} "
           f"noise={args.noise} assort={args.assort}\n")
     hist, diags = run(start, args.generations, args.seed, args.rule, args.r,
-                      args.monitoring, args.noise, args.assort, verbose=True)
+                      args.monitoring, args.noise, args.assort, verbose=True,
+                      misreport=args.misreport)
     print()
     summarise("result", hist, diags, "reciprocal")
     return 0
@@ -143,7 +147,7 @@ def cmd_scan(args) -> int:
             ends, colls = [], []
             for sd in range(args.seeds):
                 hist, diags = run(start, args.generations, sd, args.rule, args.r,
-                                  mon, args.noise, assort)
+                                  mon, args.noise, assort, misreport=args.misreport)
                 ends.append(hist[-1].get("reciprocal", 0) / args.pop)
                 colls.append(np.mean([d["collapse_rate"] for d in diags]))
             end = float(np.mean(ends))
@@ -174,7 +178,8 @@ def cmd_noise(args) -> int:
             ends, colls = [], []
             for sd in range(args.seeds):
                 hist, diags = run(start, args.generations, sd, args.rule, args.r,
-                                  args.monitoring, noise, args.assort)
+                                  args.monitoring, noise, args.assort,
+                                  misreport=args.misreport)
                 ends.append(hist[-1].get(strat, 0) / args.pop)
                 colls.append(np.mean([d["collapse_rate"] for d in diags]))
             end = float(np.mean(ends))
@@ -195,7 +200,10 @@ def main(argv=None) -> int:
     p.add_argument("--assort", type=float, default=0.0,
                    help="chance a group forms from one strategy (clustering)")
     p.add_argument("--monitoring", choices=["none", "local", "global"], default="local")
-    p.add_argument("--noise", type=float, default=0.0)
+    p.add_argument("--noise", type=float, default=0.0,
+                   help="execution error: a harvest slips to full TAKE")
+    p.add_argument("--misreport", type=float, default=0.0,
+                   help="perception error: witnesses misread a harvest")
     p.add_argument("--rule", choices=["global", "neighbour"], default="global")
     p.add_argument("--r", type=float, default=None)
     p.add_argument("--seed", type=int, default=0)
