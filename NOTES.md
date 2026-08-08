@@ -37,16 +37,19 @@ are wrong.
   how agents reason*, not to run a public game. That is why Phase 3 is built but
   not deployed, and why the observatory (Phase 5) matters more than hosting.
 - **Deployment, if it ever happens:** Fly is the cheapest and does not need a
-  GitHub remote; Render is the push-to-deploy option but needs one. A Cloudflare
-  tunnel from a laptop satisfies the Phase 3 gate for free.
+  GitHub remote; Render is push-to-deploy and now has the remote it needed. A
+  Cloudflare tunnel from a laptop satisfies the Phase 3 gate for free.
 - **Model default is `claude-haiku-4-5`**, chosen deliberately for the ~16,000
   calls a full Phase 6 matrix implies. `--model claude-opus-5` for a showcase run.
 - **40 ticks, not 100.** The world collapses around tick 20 under greed, so the
   whole arc fits in 40 at a fraction of the cost.
 - **One server instance only.** The tick barrier is in process memory; two
   replicas desynchronise silently. See the Dockerfile.
-- **The repo is local-only** — 27 commits, no remote. Pushing to GitHub is a
-  decision about visibility that has not been made.
+- **The repo is public on GitHub** — https://github.com/bharatisaket/overgraze,
+  MIT, default branch `master`, pushed 2026-08-08 at 28 commits. History was
+  scanned for credentials before publishing and was clean. Anything committed
+  from here is public immediately, so keep `.env`, `overgraze.db`, `tokens.json`
+  and `traces.jsonl` in `.gitignore` where they already are.
 
 ## Open questions
 
