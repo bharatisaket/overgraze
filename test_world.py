@@ -14,7 +14,7 @@ import numpy as np
 
 from world import (CAP, CAPACITY, COLLAPSE_FLOOR, N, PLANT, PUNISH_COST,
                    PUNISH_FINE, SAY_LIMIT, TAKE, TICKS, Action, apply_actions,
-                   history, initial_state, listen, look, neighbours_mean,
+                   history, initial_state, ledger, listen, look, neighbours_mean,
                    regrow, resolve_cell, rng_for, status)
 import harness
 
@@ -337,6 +337,82 @@ class TestSpeechReach(unittest.TestCase):
         s = at(at(st(("greedy", "greedy")), 0, 2, 2), 1, 2, 3)
         s1, _ = apply_actions(s, [Action(0, "say", text="hello")])
         self.assertEqual(s1.messages[0].heard_by, (1,))
+
+
+class TestLedger(unittest.TestCase):
+    """Monitoring: who can see who took what, and what counts as taking too much."""
+
+    def two_on(self, cell, kinds=("greedy", "greedy"), **ab):
+        s = st(kinds, **ab)
+        return at(at(s, 0, *cell), 1, *cell)
+
+    def test_monitoring_none_shows_nothing(self):
+        s = self.two_on((2, 2), monitoring="none")
+        s1, _ = apply_actions(s, [Action(1, "harvest", amount=TAKE)])
+        self.assertEqual(ledger(s1, 0)["witnessed"], [])
+
+    def test_local_monitoring_shows_a_neighbour(self):
+        s = self.two_on((2, 2), monitoring="local")
+        s1, _ = apply_actions(s, [Action(1, "harvest", amount=TAKE)])
+        rows = ledger(s1, 0)["witnessed"]
+        self.assertEqual([r["agent"] for r in rows], [1])
+
+    def test_local_monitoring_hides_the_far_side_of_the_map(self):
+        s = at(at(st(("greedy", "greedy"), monitoring="local"), 0, 0, 0), 1, 5, 5)
+        s1, _ = apply_actions(s, [Action(1, "harvest", amount=TAKE)])
+        self.assertEqual(ledger(s1, 0)["witnessed"], [])
+
+    def test_global_monitoring_sees_everything_and_scores(self):
+        s = at(at(st(("greedy", "greedy"), monitoring="global"), 0, 0, 0), 1, 5, 5)
+        s1, _ = apply_actions(s, [Action(1, "harvest", amount=TAKE)])
+        led = ledger(s1, 0)
+        self.assertEqual([r["agent"] for r in led["witnessed"]], [1])
+        self.assertEqual(len(led["scoreboard"]), 2)
+
+    def test_you_do_not_witness_yourself(self):
+        s = self.two_on((2, 2), monitoring="global")
+        s1, _ = apply_actions(s, [Action(0, "harvest", amount=TAKE)])
+        self.assertEqual(ledger(s1, 0)["witnessed"], [])
+
+    def test_witnesses_are_fixed_at_action_time(self):
+        """Walking to where a harvest happened must not reveal it afterwards."""
+        s = at(at(st(("greedy", "greedy"), monitoring="local"), 0, 0, 0), 1, 5, 5)
+        s1, _ = apply_actions(s, [Action(1, "harvest", amount=TAKE)])
+        self.assertEqual(ledger(s1, 0)["witnessed"], [])
+        walked = at(s1, 0, 5, 4)                 # agent 0 walks over later
+        self.assertEqual(ledger(walked, 0)["witnessed"], [],
+                         "monitoring leaked backwards in time")
+
+    def test_anonymity_masks_who_did_it(self):
+        s = self.two_on((2, 2), monitoring="global", anonymous=True)
+        s1, _ = apply_actions(s, [Action(1, "harvest", amount=TAKE)])
+        self.assertIsNone(ledger(s1, 0)["witnessed"][0]["agent"])
+
+    def test_over_taking_is_flagged(self):
+        """Taking a full cell below the seed line, alone, is visible greed."""
+        s = self.two_on((2, 2), monitoring="global")
+        s1, _ = apply_actions(s, [Action(1, "harvest", amount=TAKE)])   # 0.55 of 1.0
+        self.assertTrue(ledger(s1, 0)["witnessed"][0]["over_took"])
+
+    def test_restraint_is_not_flagged(self):
+        s = self.two_on((2, 2), monitoring="global")
+        s1, _ = apply_actions(s, [Action(1, "harvest", amount=0.5)])    # leaves the seed
+        self.assertFalse(ledger(s1, 0)["witnessed"][0]["over_took"])
+
+    def test_two_restrained_agents_stripping_one_cell_blame_neither(self):
+        """The case that made an earlier detector accuse honest neighbours.
+
+        Both take only the spare above the seed line, but they are standing on
+        the same cell, so between them the ground ends up bare. The cell was
+        stripped; nobody over-took; nobody should be blamed.
+        """
+        s = self.two_on((2, 2), ("cautious", "cautious"), monitoring="global")
+        s1, ev = apply_actions(s, [Action(0, "harvest", amount=0.5),
+                                   Action(1, "harvest", amount=0.5)])
+        cell = [e for e in ev if e["type"] == "cell"][0]
+        self.assertLess(cell["after"], 0.5, "the cell should end up stripped")
+        self.assertFalse(any(r["over_took"] for r in ledger(s1, 0)["witnessed"]),
+                         "joint stripping was blamed on an individual")
 
 
 class TestHistory(unittest.TestCase):

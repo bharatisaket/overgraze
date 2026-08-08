@@ -48,6 +48,9 @@ PLANT = 0.15       # resource a plant() adds to the agent's cell
 # out-produce the entire regrowth rule, cooperators absorb any amount of greed,
 # and free-riding is risk-free. That is not a commons.
 PLANT_COST = 0.15
+# A cell taken below this was stripped rather than cropped. It is the line a
+# restrained forager leaves standing, and the only public evidence of greed.
+SEED_LINE = 0.5
 TICKS = 100        # hard cap on run length -- a runaway loop cannot exceed this
 VISION = 1         # Chebyshev radius an agent can see and be heard within
 SAY_LIMIT = 140    # characters
@@ -132,9 +135,11 @@ class State:
     r: float
     messages: tuple[Message, ...] = ()
     collapsed_at: int | None = None
-    # append-only records the agents can query through history()
+    # append-only records the agents can query through history() and ledger()
     stock_log: tuple[float, ...] = ()
-    action_log: tuple[tuple, ...] = ()      # (tick, agent, kind, granted)
+    # (tick, agent, kind, granted, witnesses) -- witnesses fixed at action time,
+    # so monitoring cannot leak backwards the way listen() once did
+    action_log: tuple[tuple, ...] = ()
     # ablation switches -- carried in state so a run is fully described by it
     chat: bool = True
     punish: bool = False
@@ -142,6 +147,7 @@ class State:
     vision: int = VISION
     speech_radius: int | None = None        # None = grid-wide broadcast
     share_stock: bool = True                # agents may see the commons total
+    monitoring: str = "local"               # 'none' | 'local' | 'global'
 
     @property
     def stock(self) -> float:
@@ -225,6 +231,52 @@ def listen(state: State, agent_id: int, since: int = 0) -> list[dict]:
             if m.tick >= since and agent_id in m.heard_by]
 
 
+def witnesses_of(state: State, actor_id: int, y: int, x: int) -> tuple[int, ...]:
+    """Who observes an action taken at (y, x) by `actor_id`, right now.
+
+    Fixed at action time and stored, so an agent cannot walk over later and
+    discover what happened -- the same trap `listen()` fell into.
+    """
+    if state.monitoring == "none":
+        return ()
+    others = [o for o in state.agents if o.id != actor_id]
+    if state.monitoring == "global":
+        return tuple(o.id for o in others)
+    return tuple(o.id for o in others
+                 if max(abs(o.y - y), abs(o.x - x)) <= state.vision)
+
+
+def ledger(state: State, agent_id: int, window: int = 12) -> dict:
+    """What this agent has actually witnessed others do.
+
+    Without this an agent cannot tell *who* is draining the commons, only that
+    it is draining -- which makes reciprocity impossible to express. Tit-for-Tat
+    needs a tat to answer, and a tat needs an author.
+
+    Reports what others *received*, not what they asked for. Intent stays
+    private, so an agent outbid on a contested cell looks restrained when it was
+    merely outcompeted. That noise is deliberate: it is the condition under
+    which unforgiving reciprocity spirals and generous reciprocity wins.
+    """
+    rows = [{"tick": t, "agent": (None if state.anonymous else aid),
+             "action": kind, "harvested": round(g, 4),
+             "cell": cell, "had": round(before, 4), "left": round(left, 4),
+             # Judge each agent by what IT took, not by how the cell ended up.
+             # Two restrained foragers on one cell can strip it between them
+             # without either over-taking -- blaming both for the bare ground is
+             # how a monitor turns honest neighbours into enemies.
+             "over_took": (kind == "harvest"
+                           and g > max(before - SEED_LINE, 0.0) + 1e-9)}
+            for (t, aid, kind, g, cell, before, left, wit) in state.action_log
+            if aid != agent_id and agent_id in wit][-window:]
+    out = {"window": window, "monitoring": state.monitoring, "witnessed": rows}
+    if state.monitoring == "global":
+        # the visible-scoreboard condition
+        out["scoreboard"] = [{"agent": (None if state.anonymous else a.id),
+                              "score": round(a.score, 3)} for a in state.agents]
+    return out
+
+
 def history(state: State, agent_id: int, window: int = 12) -> dict:
     """What this agent has done lately, and how the commons has been going.
 
@@ -236,8 +288,9 @@ def history(state: State, agent_id: int, window: int = 12) -> dict:
     Phase 6 framing ablation ("your score" vs "the village's food supply") can
     withhold it.
     """
-    mine = [{"tick": t, "action": kind, "harvested": round(g, 4)}
-            for (t, aid, kind, g) in state.action_log
+    mine = [{"tick": t, "action": kind, "harvested": round(g, 4),
+             "left": round(left, 4)}
+            for (t, aid, kind, g, _c, _b, left, _w) in state.action_log
             if aid == agent_id][-window:]
     yields = [m["harvested"] for m in mine if m["action"] == "harvest"]
     out = {
@@ -277,6 +330,7 @@ def status(state: State, agent_id: int) -> dict:
                       "vision": state.vision,
                       "speech_reaches": ("everyone" if state.speech_radius is None
                                          else state.speech_radius),
+                      "monitoring": state.monitoring,
                       "run_ends_below": COLLAPSE_FLOOR}}
 
 
@@ -544,8 +598,12 @@ def apply_actions(state: State, actions: Iterable[Action]) -> tuple[State, list[
                    "regrown": stock_after - stock_before, "stock": stock_after,
                    "collapsed": collapsed is not None})
 
-    new_actions = tuple((state.tick, aid, resource[aid].kind, granted.get(aid, 0.0))
-                        for aid in sorted(resource))
+    new_actions = tuple(
+        (state.tick, aid, resource[aid].kind, granted.get(aid, 0.0),
+         destination(aid), float(state.grid[destination(aid)]),
+         float(grid[destination(aid)]),
+         witnesses_of(state, aid, *destination(aid)))
+        for aid in sorted(resource))
 
     return replace(state, tick=tick, grid=grid, agents=agents,
                    messages=state.messages + tuple(new_messages),

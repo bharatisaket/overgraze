@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from world import (CAP, DIRECTIONS, N, TAKE, TICKS, Action, State,
-                   apply_actions, initial_state, rng_for)
+                   apply_actions, history, initial_state, ledger, rng_for)
 
 # ── policies: (state, agent, rng) -> Action ───────────────────────────────────
 # Movement now costs a whole tick, so each policy has to decide whether standing
@@ -47,7 +47,7 @@ def _go(agent, cell) -> str | None:
     return None
 
 
-def greedy(state: State, agent, rng) -> list[Action]:
+def greedy(state: State, agent, rng, memory=None) -> list[Action]:
     """Step onto the richest cell in reach and strip it."""
     target, best = _reachable_best(state, agent, rng)
     acts = []
@@ -61,7 +61,7 @@ def greedy(state: State, agent, rng) -> list[Action]:
     return acts
 
 
-def cautious(state: State, agent, rng) -> list[Action]:
+def cautious(state: State, agent, rng, memory=None) -> list[Action]:
     """Step onto the richest cell in reach, but never take it below half.
 
     Where there is nothing spare anywhere nearby, replant instead of stripping.
@@ -81,7 +81,7 @@ def cautious(state: State, agent, rng) -> list[Action]:
     return acts
 
 
-def random_walk(state: State, agent, rng) -> list[Action]:
+def random_walk(state: State, agent, rng, memory=None) -> list[Action]:
     """Wander and act arbitrarily."""
     acts = []
     names = [d for d in DIRECTIONS if d != "stay"]
@@ -99,13 +99,87 @@ def random_walk(state: State, agent, rng) -> list[Action]:
     return acts
 
 
-POLICIES = {"greedy": greedy, "cautious": cautious, "random": random_walk}
+# ── reciprocity ───────────────────────────────────────────────────────────────
+# Axelrod's four qualities, expressed for an n-player commons. Tit-for-Tat does
+# not port directly: harvests are taken from a shared stock, not aimed at a
+# partner, so there is nobody to answer in kind. The analogue is conditional
+# cooperation -- restrain by default, retaliate when someone visibly takes more
+# than their share, forgive after a fixed spell.
+#
+#   nice        never harvests greedily first
+#   provokable  retaliates on witnessed over-extraction
+#   forgiving   returns to restraint after RETALIATE ticks, not forever
+#   clear       a fixed, announceable rule with no hidden state
+#
+# It is only expressible because `ledger()` attributes harvests to agents. With
+# monitoring off it degrades to pure restraint -- which is the experiment.
+RECIPROCAL_WINDOW = 8      # ticks of witnessed behaviour to weigh
+RETALIATE = 6              # ticks of retaliation before forgiving
+GRABS_BEFORE_RETALIATING = 2   # witnessed strippings that count as defection
+
+
+def reciprocal(state: State, agent, rng, memory) -> list[Action]:
+    """Restrain by default; retaliate on witnessed over-extraction; forgive."""
+    led = ledger(state, agent.id, window=RECIPROCAL_WINDOW * 4)
+    mine = history(state, agent.id, window=RECIPROCAL_WINDOW * 4)
+
+    since = state.tick - RECIPROCAL_WINDOW
+    strippings = sum(1 for row in led["witnessed"]
+                     if row["tick"] >= since and row["over_took"])
+
+    if strippings >= GRABS_BEFORE_RETALIATING:
+        # a spell, not a grudge: it lapses on its own, which is the forgiveness
+        memory["retaliate_until"] = state.tick + RETALIATE
+
+    retaliating = memory.get("retaliate_until", -1) > state.tick
+    memory["retaliated_ticks"] = memory.get("retaliated_ticks", 0) + int(retaliating)
+    return greedy(state, agent, rng) if retaliating else cautious(state, agent, rng)
+
+
+FORGIVE = 0.4              # share of provocations a generous agent lets go
+
+
+def generous(state: State, agent, rng, memory) -> list[Action]:
+    """Reciprocal, but lets some provocations go.
+
+    Contested cells make this world noisy: an agent outbid on a cell receives
+    less than it asked for, and an agent that wins a contest receives more --
+    so a restrained neighbour can look like a grabber through no fault of its
+    own. Unforgiving reciprocity reads that noise as betrayal, retaliates,
+    provokes retaliation back, and burns the commons down. Forgiving a share of
+    provocations breaks the spiral, which is Axelrod's answer to noisy play.
+    """
+    led = ledger(state, agent.id, window=RECIPROCAL_WINDOW * 4)
+    mine = history(state, agent.id, window=RECIPROCAL_WINDOW * 4)
+
+    since = state.tick - RECIPROCAL_WINDOW
+    strippings = sum(1 for row in led["witnessed"]
+                     if row["tick"] >= since and row["over_took"])
+
+    if strippings >= GRABS_BEFORE_RETALIATING:
+        if rng.random() >= FORGIVE:
+            memory["retaliate_until"] = state.tick + RETALIATE
+        else:
+            memory["forgiven"] = memory.get("forgiven", 0) + 1
+
+    retaliating = memory.get("retaliate_until", -1) > state.tick
+    memory["retaliated_ticks"] = memory.get("retaliated_ticks", 0) + int(retaliating)
+    return greedy(state, agent, rng) if retaliating else cautious(state, agent, rng)
+
+
+POLICIES = {"greedy": greedy, "cautious": cautious, "random": random_walk,
+            "reciprocal": reciprocal, "generous": generous}
 
 MIXES = {
     "greedy":   ["greedy"] * 4,
     "cautious": ["cautious"] * 4,
     "mixed":    ["greedy", "greedy", "cautious", "cautious"],
     "random":   ["random"] * 4,
+    "reciprocal":     ["reciprocal"] * 4,
+    "recip_v_greedy": ["reciprocal", "reciprocal", "greedy", "greedy"],
+    "caut_v_greedy":  ["cautious", "cautious", "greedy", "greedy"],
+    "generous":       ["generous"] * 4,
+    "gen_v_greedy":   ["generous", "generous", "greedy", "greedy"],
 }
 
 
@@ -152,13 +226,15 @@ def agent_streams(seed: int, n: int) -> list[np.random.Generator]:
 
 
 def run_episode(seed: int, mix: str, rule: str = "global", r: float = 0.15,
-                keep_events: bool = False, keep_frames: bool = False) -> Episode:
+                keep_events: bool = False, keep_frames: bool = False,
+                **ablations) -> Episode:
     kinds = MIXES[mix]
-    state = initial_state(seed, kinds, rule=rule, r=r)
+    state = initial_state(seed, kinds, rule=rule, r=r, **ablations)
     stock = [state.stock]
     log: list[dict] = []
     contested = 0
     streams = agent_streams(seed, len(kinds))
+    memories = [{} for _ in kinds]      # per-episode, so no state leaks between runs
 
     frames = [state.grid.copy()] if keep_frames else None
     positions = [[(a.y, a.x) for a in state.agents]] if keep_frames else None
@@ -167,7 +243,7 @@ def run_episode(seed: int, mix: str, rule: str = "global", r: float = 0.15,
     while not state.done:
         # policies return a list now: a move and a resource action can share a tick
         actions = [act for a in state.agents
-                   for act in POLICIES[a.kind](state, a, streams[a.id])]
+                   for act in POLICIES[a.kind](state, a, streams[a.id], memories[a.id])]
         state, events = apply_actions(state, actions)
         contested += sum(1 for e in events if e["type"] == "cell" and e["contested"])
         stock.append(state.stock)
@@ -296,6 +372,59 @@ def cmd_dilemma(args) -> int:
     return 0 if all(ok for _, ok, _ in checks) else 1
 
 
+def cmd_axelrod(args) -> int:
+    """Does monitoring change the game? Run the same policies with and without it.
+
+    The reciprocal policy is nice, provokable, forgiving and clear -- Axelrod's
+    four qualities. It can only be *expressed* when harvests are attributable,
+    so this compares identical agents across worlds that differ in one respect:
+    whether anyone can see who took what.
+    """
+    print("Axelrod check · identical policies, three monitoring regimes")
+    print(f"rule={args.rule} r={args.r} · {args.runs} seeds\n")
+    print(f"{'monitoring':<12}{'group':<18}{'survived':<11}{'collapse%':<12}"
+          f"{'welfare':<10}{'restrained':<12}{'defector'}")
+    print("-" * 84)
+
+    results = {}
+    for mon in ("none", "local", "global"):
+        for mix in ("cautious", "reciprocal", "generous",
+                    "caut_v_greedy", "recip_v_greedy", "gen_v_greedy"):
+            eps = [run_episode(s, mix, args.rule, args.r, monitoring=mon)
+                   for s in range(args.runs)]
+            per = np.array([e.scores for e in eps], dtype=float)
+            surv = float(np.mean([e.survived for e in eps]))
+            coll = float(np.mean([e.survived < TICKS for e in eps]))
+            welfare = float(per.sum(axis=1).mean())
+            # in the head-to-heads, agents 0-1 restrain and 2-3 defect
+            restrained = float(per[:, :2].mean())
+            head_to_head = mix.endswith("_v_greedy")
+            defector = float(per[:, 2:].mean()) if head_to_head else float("nan")
+            results[(mon, mix)] = (surv, coll, welfare, restrained, defector)
+            d = f"{defector:.1f}" if head_to_head else "-"
+            print(f"{mon:<12}{mix:<18}{surv:<11.1f}{coll * 100:<12.0f}"
+                  f"{welfare:<10.1f}{restrained:<12.1f}{d}")
+        print()
+
+    print("against the same two defectors, what does reciprocity buy?")
+    for mon in ("none", "local", "global"):
+        c_ = results[(mon, "caut_v_greedy")]
+        r_ = results[(mon, "recip_v_greedy")]
+        g_ = results[(mon, "gen_v_greedy")]
+        print(f"  monitoring={mon:<7} restraint {c_[3]:5.1f} | reciprocal {r_[3]:5.1f} "
+              f"({r_[3]-c_[3]:+.1f}) | generous {g_[3]:5.1f} ({g_[3]-c_[3]:+.1f})")
+    print("\nand what does a group of them do to the commons?")
+    for mon in ("none", "local", "global"):
+        for mix in ("cautious", "reciprocal", "generous"):
+            v = results[(mon, mix)]
+            print(f"  monitoring={mon:<7} all-{mix:<11} survives {v[0]:5.1f} ticks, "
+                  f"collapses {v[1]*100:3.0f}%, welfare {v[2]:5.1f}")
+    print("\n  With nothing to observe, reciprocity has no trigger and collapses into")
+    print("  plain restraint. Attribution is what makes retaliation -- and therefore")
+    print("  cooperation -- expressible at all.")
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Overgraze scripted-agent harness")
     p.add_argument("--runs", type=int, default=100, help="episodes to run (default 100)")
@@ -307,10 +436,16 @@ def main(argv=None) -> int:
                    help="scan regrowth rates for the tuning gate instead")
     p.add_argument("--dilemma", action="store_true",
                    help="measure the payoff structure and check it is a real dilemma")
+    p.add_argument("--axelrod", action="store_true",
+                   help="does monitoring make reciprocity possible? compare regimes")
+    p.add_argument("--monitoring", choices=["none", "local", "global"], default="local",
+                   help="who can see who harvested what (default local)")
     p.add_argument("--grid", type=float, nargs="+",
                    default=[0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.15, 0.20, 0.30],
                    help="regrowth rates to scan with --sweep")
     args = p.parse_args(argv)
+    if args.axelrod:
+        return cmd_axelrod(args)
     if args.dilemma:
         return cmd_dilemma(args)
     return cmd_sweep(args) if args.sweep else cmd_runs(args)
