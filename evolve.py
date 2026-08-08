@@ -160,34 +160,47 @@ def cmd_scan(args) -> int:
 
 
 def cmd_noise(args) -> int:
-    """Does a trembling hand break reciprocity, and does forgiveness rescue it?
+    """Which answer to noisy play actually works: generosity, or patience?
 
-    With noise, a restrained forager occasionally strips a cell by accident and
-    no witness can tell that from greed. Unforgiving reciprocity reads the
-    mistake as betrayal. This is the condition under which Axelrod found pure
-    Tit-for-Tat spirals and generous variants win.
+    Sweeps PERCEPTION noise, where the question is well posed -- a misreport
+    moves no resource, so anything that happens is reciprocity misfiring and
+    nothing else. Under execution noise the two effects are confounded.
     """
     n = max(1, round(args.pop * args.share))
-    print(f"trembling hand · {args.share * 100:.0f}% seeded, assort={args.assort}, "
-          f"monitoring={args.monitoring}, {args.seeds} seeds each\n")
-    print(f"{'noise':<9}{'strategy':<14}{'share':<18}{'verdict':<10}{'commons'}")
-    print("-" * 66)
-    for noise in (0.0, 0.05, 0.15, 0.30):
-        for strat in ("reciprocal", "generous"):
+    strategies = ("reciprocal", "generous", "tolerant")
+    print(f"perception noise · {args.share * 100:.0f}% seeded into a greedy population")
+    print(f"pop={args.pop} generations={args.generations} assort={args.assort} "
+          f"monitoring={args.monitoring} execution-noise={args.noise} "
+          f"· {args.seeds} seeds each\n")
+    print(f"{'misreport':<11}{'strategy':<13}{'share':<20}{'commons':<16}{'retaliating'}")
+    print("-" * 74)
+    table = {}
+    for mis in (0.0, 0.05, 0.10, 0.20):
+        for strat in strategies:
             start = {strat: n, "greedy": args.pop - n}
             ends, colls = [], []
             for sd in range(args.seeds):
                 hist, diags = run(start, args.generations, sd, args.rule, args.r,
-                                  args.monitoring, noise, args.assort,
-                                  misreport=args.misreport)
+                                  args.monitoring, args.noise, args.assort,
+                                  misreport=mis)
                 ends.append(hist[-1].get(strat, 0) / args.pop)
                 colls.append(np.mean([d["collapse_rate"] for d in diags]))
-            end = float(np.mean(ends))
-            verdict = ("FIXATED" if end > 0.95 else "invaded" if end > args.share + 0.05
-                       else "died out" if end < 0.02 else "held on")
-            print(f"{noise:<9.2f}{strat:<14}{args.share * 100:3.0f}% -> {end * 100:5.1f}%      "
-                  f"{verdict:<10}{np.mean(colls) * 100:3.0f}% collapse")
+            end, coll = float(np.mean(ends)), float(np.mean(colls))
+            sd_end = float(np.std(ends))
+            table[(mis, strat)] = (end, coll)
+            print(f"{mis:<11.2f}{strat:<13}{end * 100:5.1f}% (sd {sd_end * 100:4.1f})   "
+                  f"{coll * 100:3.0f}% collapse    -")
         print()
+
+    print("does either kind of forgiveness beat unforgiving reciprocity?")
+    for mis in (0.05, 0.10, 0.20):
+        base = table[(mis, "reciprocal")]
+        gen = table[(mis, "generous")]
+        tol = table[(mis, "tolerant")]
+        print(f"  misreport {mis:.2f}  generous {gen[0] * 100 - base[0] * 100:+5.1f}pp share "
+              f"{gen[1] * 100 - base[1] * 100:+4.0f}pp collapse   |   "
+              f"tolerant {tol[0] * 100 - base[0] * 100:+5.1f}pp share "
+              f"{tol[1] * 100 - base[1] * 100:+4.0f}pp collapse")
     return 0
 
 

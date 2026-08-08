@@ -282,6 +282,17 @@ def ledger(state: State, agent_id: int, window: int = 12) -> dict:
         draw = np.random.default_rng([state.seed, tick, actor, agent_id, 7919]).random()
         return (not truth) if draw < state.misreport else truth
 
+    # Walk backwards and stop once `window` rows are in hand. The log grows to
+    # ~400 entries over a run and every reciprocating agent reads it every tick,
+    # so scanning the whole thing each call dominated the tournament's runtime.
+    tail = []
+    for entry in reversed(state.action_log):
+        if entry[1] != agent_id and agent_id in entry[7]:
+            tail.append(entry)
+            if len(tail) >= window:
+                break
+    tail.reverse()
+
     rows = [{"tick": t, "agent": (None if state.anonymous else aid),
              "action": kind, "harvested": round(g, 4),
              "cell": cell, "had": round(before, 4), "left": round(left, 4),
@@ -291,8 +302,7 @@ def ledger(state: State, agent_id: int, window: int = 12) -> dict:
              # how a monitor turns honest neighbours into enemies.
              "over_took": seen_as(t, aid, kind == "harvest"
                                   and g > max(before - SEED_LINE, 0.0) + 1e-9)}
-            for (t, aid, kind, g, cell, before, left, wit) in state.action_log
-            if aid != agent_id and agent_id in wit][-window:]
+            for (t, aid, kind, g, cell, before, left, wit) in tail]
     out = {"window": window, "monitoring": state.monitoring, "witnessed": rows}
     if state.monitoring == "global":
         # the visible-scoreboard condition
@@ -312,10 +322,16 @@ def history(state: State, agent_id: int, window: int = 12) -> dict:
     Phase 6 framing ablation ("your score" vs "the village's food supply") can
     withhold it.
     """
+    own = []
+    for entry in reversed(state.action_log):
+        if entry[1] == agent_id:
+            own.append(entry)
+            if len(own) >= window:
+                break
+    own.reverse()
     mine = [{"tick": t, "action": kind, "harvested": round(g, 4),
              "left": round(left, 4)}
-            for (t, aid, kind, g, _c, _b, left, _w) in state.action_log
-            if aid == agent_id][-window:]
+            for (t, _a, kind, g, _c, _b, left, _w) in own]
     yields = [m["harvested"] for m in mine if m["action"] == "harvest"]
     out = {
         "window": window,

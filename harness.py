@@ -118,46 +118,32 @@ RETALIATE = 6              # ticks of retaliation before forgiving
 GRABS_BEFORE_RETALIATING = 2   # witnessed strippings that count as defection
 
 
-def reciprocal(state: State, agent, rng, memory) -> list[Action]:
-    """Restrain by default; retaliate on witnessed over-extraction; forgive."""
-    led = ledger(state, agent.id, window=RECIPROCAL_WINDOW * 4)
-    mine = history(state, agent.id, window=RECIPROCAL_WINDOW * 4)
-
-    since = state.tick - RECIPROCAL_WINDOW
-    strippings = sum(1 for row in led["witnessed"]
-                     if row["tick"] >= since and row["over_took"])
-
-    if strippings >= GRABS_BEFORE_RETALIATING:
-        # a spell, not a grudge: it lapses on its own, which is the forgiveness
-        memory["retaliate_until"] = state.tick + RETALIATE
-
-    retaliating = memory.get("retaliate_until", -1) > state.tick
-    memory["retaliated_ticks"] = memory.get("retaliated_ticks", 0) + int(retaliating)
-    return greedy(state, agent, rng) if retaliating else cautious(state, agent, rng)
-
-
 FORGIVE = 0.4              # share of provocations a generous agent lets go
+TOLERANT_EVIDENCE = 4      # strippings a tolerant agent needs before it believes it
 
 
-def generous(state: State, agent, rng, memory) -> list[Action]:
-    """Reciprocal, but lets some provocations go.
+def _conditional(state: State, agent, rng, memory, evidence: int, forgive: float):
+    """Restrain by default; retaliate on witnessed over-taking; forgive in time.
 
-    Contested cells make this world noisy: an agent outbid on a cell receives
-    less than it asked for, and an agent that wins a contest receives more --
-    so a restrained neighbour can look like a grabber through no fault of its
-    own. Unforgiving reciprocity reads that noise as betrayal, retaliates,
-    provokes retaliation back, and burns the commons down. Forgiving a share of
-    provocations breaks the spiral, which is Axelrod's answer to noisy play.
+    Axelrod offers two different answers to noisy play, and they are not the
+    same thing:
+
+      forgive   let some provocations go even when you are sure -- generosity
+      evidence  require more sightings before you believe it at all -- patience
+
+    Under perception noise a false accusation is a coin flip per sighting, so
+    demanding more evidence should suppress it faster than forgiving a fixed
+    share of already-triggered grudges. Which actually works is measurable, and
+    `evolve.py --noise-scan` measures it rather than assuming.
     """
     led = ledger(state, agent.id, window=RECIPROCAL_WINDOW * 4)
-    mine = history(state, agent.id, window=RECIPROCAL_WINDOW * 4)
-
     since = state.tick - RECIPROCAL_WINDOW
     strippings = sum(1 for row in led["witnessed"]
                      if row["tick"] >= since and row["over_took"])
 
-    if strippings >= GRABS_BEFORE_RETALIATING:
-        if rng.random() >= FORGIVE:
+    if strippings >= evidence:
+        if forgive <= 0 or rng.random() >= forgive:
+            # a spell, not a grudge: it lapses on its own
             memory["retaliate_until"] = state.tick + RETALIATE
         else:
             memory["forgiven"] = memory.get("forgiven", 0) + 1
@@ -167,8 +153,23 @@ def generous(state: State, agent, rng, memory) -> list[Action]:
     return greedy(state, agent, rng) if retaliating else cautious(state, agent, rng)
 
 
+def reciprocal(state, agent, rng, memory) -> list[Action]:
+    """Unforgiving: two sightings and it strikes back."""
+    return _conditional(state, agent, rng, memory, GRABS_BEFORE_RETALIATING, 0.0)
+
+
+def generous(state, agent, rng, memory) -> list[Action]:
+    """Same evidence bar, but lets 40% of provocations go."""
+    return _conditional(state, agent, rng, memory, GRABS_BEFORE_RETALIATING, FORGIVE)
+
+
+def tolerant(state, agent, rng, memory) -> list[Action]:
+    """Never forgives once convinced, but takes much more convincing."""
+    return _conditional(state, agent, rng, memory, TOLERANT_EVIDENCE, 0.0)
+
+
 POLICIES = {"greedy": greedy, "cautious": cautious, "random": random_walk,
-            "reciprocal": reciprocal, "generous": generous}
+            "reciprocal": reciprocal, "generous": generous, "tolerant": tolerant}
 
 MIXES = {
     "greedy":   ["greedy"] * 4,
