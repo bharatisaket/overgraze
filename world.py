@@ -41,7 +41,13 @@ import numpy as np
 N = 6              # grid is N x N cells
 CAP = 1.0          # max resource a single cell can hold
 TAKE = 0.55        # max an agent may harvest in one tick
-PLANT = 0.15       # resource a plant() adds to the agent's own cell
+PLANT = 0.15       # resource a plant() adds to the agent's cell
+# Planting costs the planter what it gives the ground: you are sowing seed you
+# could have eaten. Without this, plant() creates resource from nothing and
+# cooperation becomes a subsidy rather than a sacrifice -- two planters then
+# out-produce the entire regrowth rule, cooperators absorb any amount of greed,
+# and free-riding is risk-free. That is not a commons.
+PLANT_COST = 0.15
 TICKS = 100        # hard cap on run length -- a runaway loop cannot exceed this
 VISION = 1         # Chebyshev radius an agent can see and be heard within
 SAY_LIMIT = 140    # characters
@@ -49,9 +55,21 @@ SAY_LIMIT = 140    # characters
 PUNISH_COST = 0.2  # score the punisher forfeits
 PUNISH_FINE = 0.6  # score the punished loses
 
-COLLAPSE_FRACTION = 0.05
+# The commons is ruined when it can no longer support four foragers, not when it
+# is literally empty. At a quarter of capacity the average cell holds 0.25 --
+# less than a single agent's bite (TAKE = 0.55) -- and total regrowth is about
+# 0.34/tick split four ways, roughly 15% of one full harvest each. Below this
+# line the world is no longer a commons worth arguing over, so the run ends.
+#
+# This threshold is also what makes free-riding unsafe. With a 5% floor, two
+# defectors could never drain 34 units inside the 100-tick budget: they extract
+# ~0.5/tick and would need a 0.34/tick deficit they cannot produce at any
+# regrowth rate that still makes cooperation worth choosing. Ending the run at
+# the viability line instead of the empty line is what puts a minority of
+# defectors within reach of destroying the commons.
+COLLAPSE_FRACTION = 0.25
 CAPACITY = N * N * CAP                          # 36.0
-COLLAPSE_FLOOR = COLLAPSE_FRACTION * CAPACITY   # 1.8
+COLLAPSE_FLOOR = COLLAPSE_FRACTION * CAPACITY   # 9.0
 
 MOVES = ((0, 0), (0, 1), (0, -1), (1, 0), (-1, 0))   # stay, and 4-orthogonal
 DIRECTIONS = {"stay": (0, 0), "east": (0, 1), "west": (0, -1),
@@ -411,9 +429,11 @@ def apply_actions(state: State, actions: Iterable[Action]) -> tuple[State, list[
             cell = destination(aid)
             before = float(grid[cell])
             grid[cell] = min(CAP, before + PLANT)
+            deltas[aid] -= PLANT_COST          # a contribution, not free money
             events.append({"t": state.tick, "type": "cell", "cell": cell,
                            "before": before, "after": float(grid[cell]),
-                           "cause": "plant", "contested": False, "agents": [aid]})
+                           "cause": "plant", "contested": False, "agents": [aid],
+                           "cost": PLANT_COST})
 
     # 4. punishment -- costs the punisher, costs the punished more
     for aid, act in resource.items():

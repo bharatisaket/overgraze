@@ -113,13 +113,14 @@ MIXES = {
 # Regrowth rates the visualiser sweeps, chosen from `--sweep`: 0.02-0.10 is the
 # band where greedy collapses the commons and cautious survives it, and 0.15
 # sits past the crossover so the charts show both sides of the line.
-SWEEP_R = [0.02, 0.04, 0.06, 0.10, 0.15]
+SWEEP_R = [0.02, 0.03, 0.05, 0.08, 0.12]
 SEEDS = 40
 
-# Phase 0's tuning target -- "collapse in roughly 40 ticks" -- lands here: an
-# all-greedy group collapses at ~40 ticks under the global rule, while an
-# all-cautious group survives all 100 and out-harvests it 59.9 to 42.4.
-TUNED_R = 0.04
+# Tuned with `--dilemma`, not by eye. At this rate the world satisfies all four
+# conditions the experiment needs: defection dominates, mutual cooperation beats
+# mutual defection ~1.8x, welfare falls with every extra defector, and half the
+# group defecting usually destroys the commons -- so free-riding is not safe.
+TUNED_R = 0.05
 
 
 @dataclass
@@ -239,6 +240,62 @@ def cmd_sweep(args) -> int:
     return 0 if ok else 1
 
 
+def cmd_dilemma(args) -> int:
+    """Is this world actually a social dilemma? Measure it, don't assume it.
+
+    For k defectors among four agents, report what a defector earns, what a
+    cooperator earns, and whether the commons survives -- then check the four
+    conditions the world has to satisfy for the experiment to mean anything.
+    """
+    rows = []
+    for k in range(5):
+        MIXES["_probe"] = ["greedy"] * k + ["cautious"] * (4 - k)
+        eps = [run_episode(s, "_probe", args.rule, args.r) for s in range(args.runs)]
+        per = np.array([e.scores for e in eps], dtype=float)
+        rows.append({
+            "k": k,
+            "defector": float(per[:, :k].mean()) if k else float("nan"),
+            "cooperator": float(per[:, k:].mean()) if k < 4 else float("nan"),
+            "surv": float(np.mean([e.survived for e in eps])),
+            "collapse": float(np.mean([e.survived < TICKS for e in eps])),
+            "welfare": float(per.sum(axis=1).mean()),
+        })
+    del MIXES["_probe"]
+
+    print(f"payoff structure · rule={args.rule} r={args.r} · {args.runs} seeds")
+    print(f"{'defectors':<11}{'defector':<11}{'cooperator':<12}{'survived':<11}"
+          f"{'collapse%':<11}{'welfare'}")
+    print("-" * 66)
+    for w in rows:
+        d = f"{w['defector']:.1f}" if w["k"] else "-"
+        c = f"{w['cooperator']:.1f}" if w["k"] < 4 else "-"
+        print(f"{w['k']:<11}{d:<11}{c:<12}{w['surv']:<11.1f}"
+              f"{w['collapse']*100:<11.0f}{w['welfare']:.1f}")
+
+    T = rows[1]["defector"]        # tempt: defect alone among cooperators
+    R = rows[0]["welfare"] / 4     # reward: everyone cooperates
+    P = rows[4]["welfare"] / 4     # punishment: everyone defects
+    S = rows[1]["cooperator"]      # sucker: cooperate while someone defects
+    checks = [
+        ("payoff ordering T>R>P>S", T > R > P > S,
+         f"T={T:.1f} R={R:.1f} P={P:.1f} S={S:.1f}"),
+        ("defection dominates", all(rows[k]["defector"] > rows[k]["cooperator"]
+                                    for k in (1, 2, 3)),
+         "defecting beats cooperating at every mix"),
+        ("welfare falls with defectors", all(rows[k]["welfare"] >= rows[k + 1]["welfare"] - 1e-9
+                                             for k in range(4)),
+         "each additional defector leaves the group worse off"),
+        ("free-riding is unsafe", rows[2]["collapse"] >= 0.5,
+         f"half defecting kills it {rows[2]['collapse']*100:.0f}% of the time"),
+    ]
+    print()
+    for name, ok, detail in checks:
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name:<30} {detail}")
+    print(f"\n  cooperation pays {R / P:.2f}x mutual defection; "
+          f"defecting alone pays {T / R:.2f}x cooperating")
+    return 0 if all(ok for _, ok, _ in checks) else 1
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Overgraze scripted-agent harness")
     p.add_argument("--runs", type=int, default=100, help="episodes to run (default 100)")
@@ -248,10 +305,14 @@ def main(argv=None) -> int:
     p.add_argument("--out", default="stock.csv", help="CSV path for stock over time")
     p.add_argument("--sweep", action="store_true",
                    help="scan regrowth rates for the tuning gate instead")
+    p.add_argument("--dilemma", action="store_true",
+                   help="measure the payoff structure and check it is a real dilemma")
     p.add_argument("--grid", type=float, nargs="+",
                    default=[0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.15, 0.20, 0.30],
                    help="regrowth rates to scan with --sweep")
     args = p.parse_args(argv)
+    if args.dilemma:
+        return cmd_dilemma(args)
     return cmd_sweep(args) if args.sweep else cmd_runs(args)
 
 

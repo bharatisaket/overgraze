@@ -107,12 +107,64 @@ still wants more, never more than asked and never more than the cell holds.
   mean) × (its own empty room)`. A cell stripped to zero in a stripped region
   has nothing to recover from and stays dead.
 
-**Collapse.** A run stops early if total resource falls below 5% of capacity
-(1.8 of 36). `survived < 100` is the signature of a collapse.
+**Collapse.** A run ends when the commons can no longer support four foragers —
+below **a quarter of capacity** (9 of 36), where the average cell holds less than
+one agent's bite and total regrowth is about 0.34/tick split four ways. Not when
+the grid is literally empty.
+
+That line is doing real work, not bookkeeping. With a 5%-of-capacity floor, two
+defectors could never drain 34 units inside the 100-tick budget — they extract
+~0.5/tick and would need a 0.34/tick deficit that no regrowth rate permits while
+still making cooperation worth choosing. Ending at the viability line is what
+puts a minority of defectors within reach of destroying the commons, which is
+the difference between a dilemma and a world that quietly absorbs greed.
 
 **Randomness.** One seeded draw: which cell a forager picks when several are
 tied. Each agent has its own stream, so the order agents are processed in cannot
 influence a run.
+
+## Is it actually a dilemma?
+
+The point of the world is the incentive structure, not the scripted policies —
+once agents connect over MCP they decide for themselves, and the payoffs have to
+do the teaching. So the structure is measured rather than assumed:
+
+```bash
+python harness.py --dilemma
+```
+
+For k defectors among four agents, at the tuned rate (`global`, r = 0.05):
+
+| defectors | a defector earns | a cooperator earns | collapse % | total welfare |
+|---|---|---|---|---|
+| 0 | — | **15.8** | 0 | 63.1 |
+| 1 | 37.9 | 6.9 | 10 | 58.7 |
+| 2 | 17.2 | 5.9 | **68** | 46.0 |
+| 3 | 11.3 | 5.5 | 88 | 39.5 |
+| 4 | **8.7** | — | 100 | 34.9 |
+
+Four conditions, all checked by that command:
+
+- **T > R > P > S** — 37.9 > 15.8 > 8.7 > 6.9. The canonical dilemma ordering.
+- **Defection dominates** at every mix, so aggression is where a self-interested
+  agent starts. It should be: that is the whole tension.
+- **Welfare falls with every extra defector**, so the group's best outcome is
+  universal restraint.
+- **Free-riding is unsafe** — half the group defecting destroys the commons 68%
+  of the time (87% under the `neighbour` rule).
+
+The arc that produces: defecting alone pays **2.4×** what cooperating pays, so
+agents start greedy. But if everyone follows that reasoning the commons dies at
+tick ~20 and each agent walks away with 8.7, where mutual restraint would have
+paid **1.81×** that. And because two defectors are usually enough to kill it,
+restraint has to be near-universal to work — which is what makes agreements
+worth negotiating rather than a nicety.
+
+**`plant()` costs what it gives.** Sowing seed you could have eaten is a
+contribution, not free money. Without that cost, two planters out-produce the
+entire regrowth rule, cooperators absorb any amount of greed, and a lone
+defector actually *raises* total welfare — the world rewards greed and teaches
+the opposite lesson.
 
 ## Results
 
