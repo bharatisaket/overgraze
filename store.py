@@ -33,7 +33,6 @@ import numpy as np
 from world import (Action, Agent, Message, State, TICKS, apply_actions,
                    initial_state)
 
-DB_PATH = Path(__file__).with_name("overgraze.db")
 BARRIER_TIMEOUT = 30.0     # seconds before absent agents are recorded as noop
 
 SCHEMA = """
@@ -85,7 +84,25 @@ def locked(fn):
     return wrapper
 
 
-def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
+def connect(path: Path | str | None = None) -> sqlite3.Connection:
+    """Open the store. Resolve the default at call time, never at import.
+
+    This used to default to `Path(__file__).with_name("overgraze.db")`, bound
+    once as a default argument, while server.py opened `deploy.db_path()` --
+    which honours OVERGRAZE_DB. With that variable set the two disagreed and
+    the process ran on two databases at once: the harness seeded runs and seats
+    into one, the server looked up tokens in the other and rejected every
+    action as "unknown token -- this seat does not exist". Nothing failed
+    loudly; a 40-tick run made all 160 model calls and finished at tick 0.
+
+    That is the deployment configuration, not an exotic one -- deploy.py exists
+    to point this at a mounted volume, so the server would have read the volume
+    while everything else wrote to the container's ephemeral disk.
+    """
+    import deploy  # local: deploy is a leaf, but keep the module graph acyclic
+
+    if path is None:
+        path = deploy.db_path()
     con = sqlite3.connect(str(path), isolation_level=None, timeout=10.0,
                           check_same_thread=False)
     con.row_factory = sqlite3.Row

@@ -201,6 +201,7 @@ class Agent:
     horizon: str = "true"
     total_ticks: int = 0
     dry_run: bool = False
+    action_errors: int = 0
 
     session: ClientSession | None = None
     memory: str = ""
@@ -363,6 +364,25 @@ class Agent:
                             "usage": decision.get("_usage"),
                         })
                         self.decisions.append(decision)
+
+                        # Refuse to keep paying for a run that is not landing.
+                        # A split database once let a 40-tick run make all 160
+                        # model calls, have every action rejected as an unknown
+                        # token, and exit 0 at tick 0 -- the failure was only
+                        # visible in a field nothing asserted on. An action
+                        # that errors twice running is a broken run, not a bad
+                        # decision, and the cheapest moment to stop is now.
+                        if outcome.get("error"):
+                            self.action_errors += 1
+                            if self.action_errors >= 2:
+                                raise RuntimeError(
+                                    f"{self.name}: two actions running were "
+                                    f"rejected ({outcome['error']!r}). Stopping "
+                                    f"before this burns the budget at tick "
+                                    f"{seen['status'].get('tick')}.")
+                        else:
+                            self.action_errors = 0
+
                         if outcome.get("resolved") is False or outcome.get("collapsed"):
                             break
 

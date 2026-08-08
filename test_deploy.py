@@ -25,6 +25,32 @@ class TestConfig(unittest.TestCase):
         with mock.patch.dict(os.environ, {"OVERGRAZE_DB": ""}):
             self.assertEqual(deploy.db_path().name, "overgraze.db")
 
+    def test_the_store_opens_the_database_the_environment_names(self):
+        """store.connect() and server must not resolve to different files.
+
+        They once did. store.connect defaulted to a path bound at import time,
+        beside the code, while server.py opened deploy.db_path(). Setting
+        OVERGRAZE_DB -- which is exactly what deploying does, to reach a mounted
+        volume -- split the process across two databases: seats were written to
+        one and looked up in the other, so every action came back "unknown
+        token" and a 40-tick run finished at tick 0 having paid for all 160
+        model calls. Both tests above passed throughout, because neither asked
+        whether store agreed with deploy.
+        """
+        import store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wanted = Path(tmp) / "volume.db"
+            with mock.patch.dict(os.environ, {"OVERGRAZE_DB": str(wanted)}):
+                con = store.connect()
+                try:
+                    opened = Path(con.execute(
+                        "PRAGMA database_list").fetchone()[2])
+                finally:
+                    con.close()
+                self.assertEqual(opened, wanted)
+                self.assertEqual(opened, deploy.db_path())
+
     def test_a_platform_port_means_bind_every_interface(self):
         with mock.patch.dict(os.environ, {"PORT": "9999"}, clear=False):
             self.assertEqual(deploy.port(), 9999)
