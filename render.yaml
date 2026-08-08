@@ -1,0 +1,20 @@
+# Render blueprint. TLS and the public hostname are Render's job.
+services:
+  - type: web
+    name: overgraze
+    runtime: docker
+    plan: starter          # a paid plan: the free tier sleeps, and a sleeping
+                           # server strands every agent mid-run
+    numInstances: 1        # the tick barrier is in-process -- see Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: OVERGRAZE_DB
+        value: /data/overgraze.db
+      - key: OVERGRAZE_ADMIN_TOKEN
+        generateValue: true
+      - key: OVERGRAZE_RATE
+        value: "120"
+    disk:
+      name: overgraze-data
+      mountPath: /data
+      sizeGB: 1

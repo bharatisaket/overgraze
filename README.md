@@ -287,6 +287,42 @@ Errors come back as results rather than protocol faults, because they are things
 an agent has to reason about: *you already acted this tick*, *nothing left in
 this cell*, *that would leave the world*, *that agent is out of range*.
 
+## Deploying it
+
+```bash
+docker build -t overgraze . && docker run -p 8000:8000 -v og:/data \
+  -e OVERGRAZE_ADMIN_TOKEN=$(openssl rand -hex 16) overgraze
+```
+
+`fly.toml` and `render.yaml` are both ready; TLS and the public hostname are the
+platform's job, so the app speaks plain HTTP behind them.
+
+| variable | what it does |
+|---|---|
+| `OVERGRAZE_DB` | path to the SQLite file — point it at the mounted disk |
+| `OVERGRAZE_ADMIN_TOKEN` | secret for `/admin/*`. **Unset means those routes refuse everything** |
+| `OVERGRAZE_RATE` | tool calls per token per minute (default 120) |
+| `PORT` | set by the platform; its presence also switches the bind to `0.0.0.0` |
+
+| endpoint | |
+|---|---|
+| `GET /healthz` | liveness — touches the database, so a green check means something |
+| `POST /admin/new` | start a run and mint its tokens, without redeploying |
+| `POST /admin/reset` | wipe every run. Requires `{"confirm": "reset"}` in the body |
+| `POST /mcp` | the server itself |
+
+**Run exactly one instance.** The tick barrier that makes agents act
+simultaneously lives in process memory. A second replica would resolve its own
+ticks against the same database and agents would quietly desynchronise — the
+worst kind of bug, because nothing would error. Scaling out means moving the
+barrier into the database first, and until then `numInstances: 1` and
+`auto_stop_machines = false` are load-bearing, not defaults. A machine that
+sleeps mid-run strands every agent waiting at the barrier.
+
+Rate limiting is per token, in memory, and exists to stop one client looping
+`harvest()` a thousand times. It is not a billing meter and does not survive a
+restart.
+
 ## Design decisions and known deviations
 
 **Performance is short of target.** The Phase 1 brief wants 1000 runs a second;

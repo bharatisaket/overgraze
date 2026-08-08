@@ -21,10 +21,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import secrets
 import sys
 
 from mcp.server.mcpserver import Context, MCPServer
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
+import deploy
 import store
 from world import (SAY_LIMIT, TAKE, TICKS, Action, history, ledger, listen,
                    look, status)
@@ -43,12 +47,13 @@ mcp = MCPServer(
 )
 
 _con = None
+_limiter = deploy.RateLimiter()
 
 
 def con():
     global _con
     if _con is None:
-        _con = store.connect()
+        _con = store.connect(deploy.db_path())
     return _con
 
 
@@ -62,6 +67,11 @@ def whoami(ctx: Context):
     row = store.player_for(con(), token)
     if row is None:
         return None, {"error": "unknown token -- this seat does not exist"}
+    allowed, wait = _limiter.check(token)
+    if not allowed:
+        return None, {"error": "rate limit exceeded -- you are calling too fast",
+                      "retry_after_seconds": round(wait, 1),
+                      "limit_per_minute": _limiter.limit}
     return row, None
 
 
@@ -171,6 +181,65 @@ async def say(ctx: Context, message: str) -> dict:
                      else "you already spoke this tick")}
 
 
+# ── operational routes ────────────────────────────────────────────────────────
+@mcp.custom_route("/healthz", methods=["GET"])
+async def healthz(request: Request) -> JSONResponse:
+    """Liveness for the platform. Touches the database so it means something."""
+    try:
+        n = con().execute("SELECT COUNT(*) c FROM runs").fetchone()["c"]
+        return JSONResponse({"ok": True, "runs": n, "db": str(deploy.db_path())})
+    except Exception as exc:                       # a health check must not raise
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+
+
+def _admin_ok(request: Request) -> bool:
+    """Constant-ish time check, and closed by default when no secret is set."""
+    want = deploy.admin_token()
+    if not want:
+        return False
+    got = request.headers.get("x-admin-token", "")
+    return secrets.compare_digest(got, want)
+
+
+@mcp.custom_route("/admin/new", methods=["POST"])
+async def admin_new(request: Request) -> JSONResponse:
+    """Start a fresh run and mint its tokens, without a redeploy."""
+    if not _admin_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    names = body.get("names") or ["alice", "bob", "carol", "dave"]
+    opts = {k: body[k] for k in ("r", "monitoring", "punish", "noise", "misreport",
+                                 "chat", "anonymous", "share_stock") if k in body}
+    info = store.create_run(con(), names, seed=int(body.get("seed", 0)), **opts)
+    return JSONResponse(info)
+
+
+@mcp.custom_route("/admin/reset", methods=["POST"])
+async def admin_reset(request: Request) -> JSONResponse:
+    """Wipe every run so the next demo starts clean. Deliberately explicit."""
+    if not _admin_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    if body.get("confirm") != "reset":
+        return JSONResponse(
+            {"error": "send {\"confirm\": \"reset\"} -- this deletes every run"},
+            status_code=400)
+    c = con()
+    for table in ("intents", "events", "players", "runs"):
+        c.execute(f"DELETE FROM {table}")
+    store._waiters.clear()
+    store._locks.clear()
+    return JSONResponse({"ok": True, "reset": True})
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Overgraze MCP server")
     p.add_argument("--new", nargs="+", metavar="NAME",
@@ -179,8 +248,8 @@ def main(argv=None) -> int:
     p.add_argument("--r", type=float, default=None)
     p.add_argument("--monitoring", choices=["none", "local", "global"], default="local")
     p.add_argument("--punish", action="store_true", help="enable the punish tool")
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--host", default=None)
+    p.add_argument("--port", type=int, default=None)
     args = p.parse_args(argv)
 
     if args.new:
@@ -191,9 +260,13 @@ def main(argv=None) -> int:
         print(json.dumps(info, indent=2))
         return 0
 
-    print(f"overgraze mcp on http://{args.host}:{args.port}/mcp", file=sys.stderr)
+    h = args.host or deploy.host()
+    prt = args.port or deploy.port()
+    print(f"overgraze mcp on http://{h}:{prt}/mcp  (db {deploy.db_path()}, "
+          f"admin {'on' if deploy.admin_token() else 'off'}, "
+          f"rate {_limiter.limit}/min)", file=sys.stderr)
     import anyio
-    anyio.run(lambda: mcp.run_streamable_http_async(host=args.host, port=args.port))
+    anyio.run(lambda: mcp.run_streamable_http_async(host=h, port=prt))
     return 0
 
 
