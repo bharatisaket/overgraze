@@ -12,24 +12,38 @@ where the work stopped.
 | 1 — world engine | done. `world.py`, `harness.py`, 88 tests, tuned so the dilemma is real |
 | 2 — MCP layer | done. `server.py` + `store.py`, 17 tests, gate passes (`play.py --self-test`) |
 | 3 — deploy | **built but never deployed.** Dockerfile, `fly.toml`, `render.yaml`, health, admin, rate limiting, 16 tests. Deferred deliberately — see below |
-| 4 — agents | **wiring done, never run for real.** `dispositions.py`, `llm_agents.py`, verified only with `--dry-run` |
+| 4 — agents | **first real run done** 2026-08-08: 5 ticks, 4 agents, 20 Haiku calls, $0.15. Dispositions diverge, a pact forms and breaks. n=1 |
 | 5 — observatory | not started. An earlier visualiser exists (`viz_template.html`) but renders precomputed frames, not the event log |
 | 6 — ablations | not started for LLM agents. Scripted equivalents are done (`harness.py --dilemma`, `evolve.py`) |
 | 7 — write-up | not started |
 
-## The one thing blocking everything
+## The blocker is cleared — and what it revealed
 
-**No real model call has ever been made.** `ANTHROPIC_API_KEY` was never set in
-the environment where this was built. Before anything downstream, run:
+The first real run happened on 2026-08-08. The agents play sensibly; the
+premise holds. Three things came out of it that change the plan.
 
-```bash
-python llm_agents.py --ticks 5 --budget 0.50
-```
+**1. The agents do not know when the run ends.** `status` reports
+`ticks_remaining` from `world.TICKS` (100), not from `--ticks`
+(`store.py:325`). In the 5-tick run every agent reasoned as though 97 turns of
+future remained, and the maximizer's pivot to cooperation was explicitly a
+shadow-of-the-future calculation over that horizon. This is not a cosmetic
+mismatch: a *known finite* horizon should unravel cooperation by backward
+induction, so the perceived horizon is an independent variable and right now
+it is an accident. Decide deliberately whether agents see the true end, then
+make `--ticks` and the reported horizon agree.
 
-Then read `traces.jsonl`. Everything in Phases 5–7 assumes the agents produce
-sensible play, and that assumption is currently unverified. If the reasoning
-reads as thoughtless, raise `--effort` from `low` before concluding the prompts
-are wrong.
+**2. Costs are ~15x the back-of-envelope.** 20 calls cost $0.1519, i.e.
+$0.0076/call, because thinking roughly triples output tokens and the whole
+observation JSON sits uncached in every user turn. A 40-tick run is ~160 calls
+≈ $1.20; a 100-run Phase 6 matrix is ~$120, not ~$10. Either budget for that or
+cache/trim the observation payload first.
+
+**3. False accusations arose with no injected noise.** Agents accused each
+other of breaking a pact using pre-pact harvests as evidence, and the pact died
+of it — the same failure the scripted `--noise-scan` produces with a 10%
+misreport rate. Worth checking whether the ledger's presentation invites it.
+
+Next: several seeds at 40 ticks before any of this is called a result.
 
 ## Decisions that would otherwise get re-litigated
 

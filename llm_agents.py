@@ -59,7 +59,13 @@ PRICING = {
 
 # A tick is a small, well-specified decision, which is what `low` effort is for.
 # Raise it if the traces read as thoughtless -- that is the thing to watch.
+# Only models that support adaptive thinking accept it; see request_shape.
 DEFAULT_EFFORT = "low"
+
+# For models that take an explicit thinking budget instead of an effort level.
+# Measured on haiku-4-5: thinking roughly triples output tokens (125 -> 356 on
+# one decision), which is the whole cost argument for keeping a tick small.
+THINK_BUDGET = 1024
 
 DECISION_SCHEMA = {
     "type": "object",
@@ -145,6 +151,34 @@ class BudgetExceeded(RuntimeError):
     pass
 
 
+# ── how this model wants to be asked to think ─────────────────────────────────
+def request_shape(client: anthropic.Anthropic, model: str, effort: str) -> dict:
+    """The thinking and output_config kwargs `model` will actually accept.
+
+    `effort` and adaptive thinking are one interface, introduced with Claude
+    4.6; haiku-4-5 predates it and takes an explicit token budget instead.
+    Sending the wrong one is a 400, not a downgrade -- which is exactly how the
+    first real run died after the default model was changed to Haiku for cost.
+
+    This asks the Models API rather than consulting a hardcoded table, because
+    a table silently rots every time a model is added and the failure mode is
+    an aborted run rather than a warning. One free call at startup.
+    """
+    fmt = {"format": {"type": "json_schema", "schema": DECISION_SCHEMA}}
+    caps = client.models.retrieve(model).model_dump().get("capabilities", {})
+    kinds = caps.get("thinking", {}).get("types", {})
+
+    if kinds.get("adaptive", {}).get("supported"):
+        return {"thinking": {"type": "adaptive", "display": "summarized"},
+                "output_config": {"effort": effort, **fmt}}
+    if kinds.get("enabled", {}).get("supported"):
+        # Verified against haiku-4-5: an explicit budget and a json_schema
+        # response coexist, so the reasoning trail survives the downgrade.
+        return {"thinking": {"type": "enabled", "budget_tokens": THINK_BUDGET},
+                "output_config": fmt}
+    return {"output_config": fmt}
+
+
 # ── one agent ─────────────────────────────────────────────────────────────────
 @dataclass
 class Agent:
@@ -156,6 +190,7 @@ class Agent:
     effort: str
     budget: Budget
     trace: "Trace"
+    shape: dict = field(default_factory=dict)
     dry_run: bool = False
 
     session: ClientSession | None = None
@@ -217,10 +252,8 @@ class Agent:
             # volatile state lives in the user turn where it cannot invalidate it.
             system=[{"type": "text", "text": self.system,
                      "cache_control": {"type": "ephemeral"}}],
-            thinking={"type": "adaptive", "display": "summarized"},
-            output_config={"effort": self.effort,
-                           "format": {"type": "json_schema", "schema": DECISION_SCHEMA}},
             messages=[{"role": "user", "content": prompt}],
+            **self.shape,
         )
         self.budget.record(response.usage)
 
@@ -332,14 +365,22 @@ async def run(args) -> int:
     trace = Trace(Path(args.trace))
     budget = Budget(limit_usd=args.budget, model=args.model)
     client = None if args.dry_run else anthropic.Anthropic()
+    shape = {} if client is None else request_shape(client, args.model, args.effort)
+    if client is not None:
+        think = shape.get("thinking", {}).get("type", "off")
+        print(f"thinking={think} effort="
+              f"{shape.get('output_config', {}).get('effort', 'n/a')}\n")
 
     agents = [Agent(name=n, disposition=n, token=t,
                     url=f"http://127.0.0.1:{args.port}/mcp",
                     model=args.model, effort=args.effort, budget=budget,
-                    trace=trace, dry_run=args.dry_run)
+                    trace=trace, shape=shape, dry_run=args.dry_run)
               for n, t in info["tokens"].items()]
+    # The thinking shape is recorded because it is not cosmetic: it changes how
+    # much the model deliberates per tick, so runs are only comparable within it.
     trace.write({"type": "run", "run_id": info["run_id"], "seats": seats,
                  "model": args.model, "effort": args.effort, "seed": args.seed,
+                 "thinking": shape.get("thinking"),
                  "r": args.r, "monitoring": args.monitoring,
                  "punish": args.punish, "chat": not args.no_chat})
 
