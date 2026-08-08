@@ -62,10 +62,12 @@ PRICING = {
 # Only models that support adaptive thinking accept it; see request_shape.
 DEFAULT_EFFORT = "low"
 
-# For models that take an explicit thinking budget instead of an effort level.
-# Measured on haiku-4-5: thinking roughly triples output tokens (125 -> 356 on
-# one decision), which is the whole cost argument for keeping a tick small.
-THINK_BUDGET = 1024
+# Thinking is OFF by default because it is the single largest line item. Measured
+# over the first real run: output was 72% of spend at 1100 tok/call, and a 1024
+# budget is nearly all of it. The decision's own `reasoning` field survives
+# without it -- that field, not the thinking block, is what the study reads.
+# Pass --think-budget 1024 when reasoning quality matters more than run count.
+THINK_BUDGET = 0
 
 DECISION_SCHEMA = {
     "type": "object",
@@ -152,7 +154,8 @@ class BudgetExceeded(RuntimeError):
 
 
 # ── how this model wants to be asked to think ─────────────────────────────────
-def request_shape(client: anthropic.Anthropic, model: str, effort: str) -> dict:
+def request_shape(client: anthropic.Anthropic, model: str, effort: str,
+                  think_budget: int = THINK_BUDGET) -> dict:
     """The thinking and output_config kwargs `model` will actually accept.
 
     `effort` and adaptive thinking are one interface, introduced with Claude
@@ -169,13 +172,17 @@ def request_shape(client: anthropic.Anthropic, model: str, effort: str) -> dict:
     kinds = caps.get("thinking", {}).get("types", {})
 
     if kinds.get("adaptive", {}).get("supported"):
-        return {"thinking": {"type": "adaptive", "display": "summarized"},
-                "output_config": {"effort": effort, **fmt}}
+        shape = {"output_config": {"effort": effort, **fmt}}
+        if think_budget:
+            shape["thinking"] = {"type": "adaptive", "display": "summarized"}
+        return shape
     if kinds.get("enabled", {}).get("supported"):
         # Verified against haiku-4-5: an explicit budget and a json_schema
-        # response coexist, so the reasoning trail survives the downgrade.
-        return {"thinking": {"type": "enabled", "budget_tokens": THINK_BUDGET},
-                "output_config": fmt}
+        # response coexist, so the reasoning trail survives if it is paid for.
+        if think_budget:
+            return {"thinking": {"type": "enabled",
+                                 "budget_tokens": think_budget},
+                    "output_config": fmt}
     return {"output_config": fmt}
 
 
@@ -241,8 +248,13 @@ class Agent:
                     "target_agent": -1, "say": "", "note_to_self": ""}
 
         self.budget.check()
+        # Compact separators, not indent=2. The observation is re-sent every
+        # tick and is too volatile to cache, so its pretty-printing is paid for
+        # on every call: measured 1232 -> 676 tokens, ~26% off the input bill
+        # for no loss of information.
         prompt = (f"Your notes from earlier:\n{self.memory or '(none yet)'}\n\n"
-                  f"What you can see now:\n{json.dumps(seen, indent=2, default=str)}")
+                  f"What you can see now:\n"
+                  f"{json.dumps(seen, separators=(',', ':'), default=str)}")
 
         response = client.messages.create(
             model=self.model,
@@ -365,7 +377,8 @@ async def run(args) -> int:
     trace = Trace(Path(args.trace))
     budget = Budget(limit_usd=args.budget, model=args.model)
     client = None if args.dry_run else anthropic.Anthropic()
-    shape = {} if client is None else request_shape(client, args.model, args.effort)
+    shape = ({} if client is None else
+             request_shape(client, args.model, args.effort, args.think_budget))
     if client is not None:
         think = shape.get("thinking", {}).get("type", "off")
         print(f"thinking={think} effort="
@@ -410,6 +423,11 @@ async def run(args) -> int:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="run language-model foragers")
     p.add_argument("--model", default=DEFAULT_MODEL)
+    p.add_argument("--think-budget", type=int, default=THINK_BUDGET,
+                   help="tokens of extended thinking per decision; 0 is off "
+                        "and is the default because thinking was 72%% of the "
+                        "first run's bill. The decision's own reasoning field "
+                        "is kept either way")
     p.add_argument("--effort", default=DEFAULT_EFFORT,
                    choices=["low", "medium", "high", "xhigh", "max"])
     p.add_argument("--ticks", type=int, default=40,
