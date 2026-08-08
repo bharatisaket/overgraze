@@ -16,3 +16,7 @@ overgraze.db
 overgraze.db-wal
 overgraze.db-shm
 tokens.json
+
+# agent reasoning traces
+traces.jsonl
+*.jsonl

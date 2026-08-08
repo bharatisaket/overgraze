@@ -226,7 +226,8 @@ distinguished by silhouette as well as colour.
 `export_viz.py` drives `world.apply_actions` through the scripted harness rather
 than reimplementing anything, so the picture cannot drift from the engine.
 
-Published (private): https://claude.ai/code/artifact/3a83f628-6372-451a-aceb-c07c7d6d7559
+Build it yourself with the two commands above -- the page is self-contained,
+so opening `overgraze.html` from disk works with no server and no network.
 
 ## History
 
