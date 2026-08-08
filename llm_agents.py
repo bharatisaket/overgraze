@@ -218,7 +218,7 @@ class Agent:
             text = getattr(block, "text", None)
             if text:
                 try:
-                    return json.loads(text)
+                    return self.apply_horizon(json.loads(text))
                 except json.JSONDecodeError:
                     return {"text": text}
         return {}
@@ -239,7 +239,12 @@ class Agent:
         actually run -- the original behaviour, and a precise falsehood whenever
         --ticks disagrees with it. Kept only to reproduce earlier runs.
         """
-        if self.horizon == "world":
+        # Every tool return carries a status blob, not just get_status: acting
+        # hands back ticks_remaining too. Filtering only the observation left
+        # the treatment leaking through the action path -- the hidden condition
+        # still saw a countdown, and the true condition saw two different ones.
+        # So this is keyed on the field, not on which call produced it.
+        if self.horizon == "world" or "ticks_remaining" not in status:
             return status
         status = dict(status)
         if self.horizon == "hidden":
@@ -251,7 +256,7 @@ class Agent:
 
     async def observe(self) -> dict:
         """The free reads. None of these consume a tick."""
-        status = self.apply_horizon(await self.call("get_status"))
+        status = await self.call("get_status")   # call() applies the horizon
         view = await self.call("look_around")
         heard = await self.call("listen_for_messages", since_tick=self.last_heard_tick)
         past = await self.call("get_history", window=8)
