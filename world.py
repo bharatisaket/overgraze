@@ -96,6 +96,10 @@ class Message:
     y: int
     x: int
     text: str
+    # Who was in earshot *when it was said*. Filtering `listen()` on current
+    # geometry instead would let an agent walk to where a conversation happened
+    # and overhear it after the fact.
+    heard_by: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -128,11 +132,16 @@ class State:
     r: float
     messages: tuple[Message, ...] = ()
     collapsed_at: int | None = None
+    # append-only records the agents can query through history()
+    stock_log: tuple[float, ...] = ()
+    action_log: tuple[tuple, ...] = ()      # (tick, agent, kind, granted)
     # ablation switches -- carried in state so a run is fully described by it
     chat: bool = True
     punish: bool = False
     anonymous: bool = False
     vision: int = VISION
+    speech_radius: int | None = None        # None = grid-wide broadcast
+    share_stock: bool = True                # agents may see the commons total
 
     @property
     def stock(self) -> float:
@@ -155,7 +164,8 @@ def initial_state(seed: int, kinds: Sequence[str], rule: str = "global",
     agents = tuple(Agent(id=i, kind=k, y=starts[i][0], x=starts[i][1])
                    for i, k in enumerate(kinds))
     return State(tick=0, grid=np.full((N, N), CAP, dtype=float), agents=agents,
-                 seed=seed, rule=rule, r=float(r), **ablations)
+                 seed=seed, rule=rule, r=float(r), stock_log=(CAPACITY,),
+                 **ablations)
 
 
 # ── determinism ───────────────────────────────────────────────────────────────
@@ -191,21 +201,68 @@ def look(state: State, agent_id: int) -> dict:
             "here": float(state.grid[me.y, me.x]), "cells": cells, "agents": others}
 
 
+def audience(state: State, speaker: Agent) -> tuple[int, ...]:
+    """Who hears a message spoken now. With speech_radius=None, everyone."""
+    return tuple(o.id for o in state.agents
+                 if o.id != speaker.id
+                 and (state.speech_radius is None
+                      or in_range(speaker, o.y, o.x, state.speech_radius)))
+
+
 def listen(state: State, agent_id: int, since: int = 0) -> list[dict]:
-    """Messages spoken within earshot since `since`, oldest first.
+    """Messages this agent actually heard, oldest first.
+
+    Filtered on the audience recorded when each message was spoken, never on
+    where the listener happens to be standing now.
 
     Under anonymity the speaker is masked here rather than in the log -- the
     event log stays truthful for analysis; only the agent's view is anonymous.
     """
-    me = next(ag for ag in state.agents if ag.id == agent_id)
-    out = []
-    for m in state.messages:
-        if m.tick < since or m.speaker == agent_id:
-            continue
-        if in_range(me, m.y, m.x, state.vision):
-            out.append({"tick": m.tick,
-                        "speaker": (None if state.anonymous else m.speaker),
-                        "text": m.text})
+    return [{"tick": m.tick,
+             "speaker": (None if state.anonymous else m.speaker),
+             "text": m.text}
+            for m in state.messages
+            if m.tick >= since and agent_id in m.heard_by]
+
+
+def history(state: State, agent_id: int, window: int = 12) -> dict:
+    """What this agent has done lately, and how the commons has been going.
+
+    An agent that can only see one cell cannot tell a recovering world from a
+    dying one. Without this, "cooperation pays" is not discoverable from inside
+    the game -- an agent would have to infer a trend it has never been shown.
+
+    `commons` is the total-stock series. It is gated on `share_stock` so the
+    Phase 6 framing ablation ("your score" vs "the village's food supply") can
+    withhold it.
+    """
+    mine = [{"tick": t, "action": kind, "harvested": round(g, 4)}
+            for (t, aid, kind, g) in state.action_log
+            if aid == agent_id][-window:]
+    yields = [m["harvested"] for m in mine if m["action"] == "harvest"]
+    out = {
+        "window": window,
+        "my_actions": mine,
+        "my_recent_harvest": round(sum(yields), 4),
+        "my_yield_trend": ("falling" if len(yields) >= 4
+                           and sum(yields[-len(yields)//2:]) < sum(yields[:len(yields)//2])
+                           else "steady or rising" if yields else "no harvests yet"),
+    }
+    if state.share_stock:
+        series = list(state.stock_log)[-window:]
+        out["commons"] = [round(v, 3) for v in series]
+        out["commons_now"] = round(state.stock, 3)
+        out["commons_capacity"] = CAPACITY
+        out["collapse_floor"] = COLLAPSE_FLOOR
+        if len(series) >= 2:
+            drop = series[0] - series[-1]
+            out["commons_trend"] = ("falling" if drop > 1e-9 else
+                                    "rising" if drop < -1e-9 else "flat")
+            if drop > 1e-9:
+                remaining = state.stock - COLLAPSE_FLOOR
+                rate = drop / (len(series) - 1)
+                out["ticks_to_collapse_at_this_rate"] = (
+                    max(0, int(remaining / rate)) if rate > 0 else None)
     return out
 
 
@@ -215,9 +272,12 @@ def status(state: State, agent_id: int) -> dict:
             "ticks_remaining": max(0, TICKS - state.tick),
             "position": (me.y, me.x), "collapsed": state.collapsed_at is not None,
             "rules": {"take_limit": TAKE, "plant_amount": PLANT,
+                      "plant_cost": PLANT_COST,
                       "chat": state.chat, "punish": state.punish,
                       "vision": state.vision,
-                      "ends_if_resource_exhausted": True}}
+                      "speech_reaches": ("everyone" if state.speech_radius is None
+                                         else state.speech_radius),
+                      "run_ends_below": COLLAPSE_FLOOR}}
 
 
 # ── rules ─────────────────────────────────────────────────────────────────────
@@ -454,14 +514,15 @@ def apply_actions(state: State, actions: Iterable[Action]) -> tuple[State, list[
     new_messages = []
     for aid in sorted(speech):
         y, x = destination(aid)
+        heard = tuple(o.id for o in state.agents if o.id != aid
+                      and (state.speech_radius is None
+                           or max(abs(destination(o.id)[0] - y),
+                                  abs(destination(o.id)[1] - x)) <= state.speech_radius))
         msg = Message(tick=state.tick, speaker=aid, y=y, x=x,
-                      text=speech[aid].text.strip())
+                      text=speech[aid].text.strip(), heard_by=heard)
         new_messages.append(msg)
-        heard = [o.id for o in state.agents if o.id != aid
-                 and max(abs(destination(o.id)[0] - y),
-                         abs(destination(o.id)[1] - x)) <= state.vision]
         events.append({"t": state.tick, "type": "speech", "agent": aid,
-                       "text": msg.text, "heard_by": heard})
+                       "text": msg.text, "heard_by": list(heard)})
 
     agents = tuple(
         replace(a, y=destination(a.id)[0], x=destination(a.id)[1],
@@ -483,6 +544,11 @@ def apply_actions(state: State, actions: Iterable[Action]) -> tuple[State, list[
                    "regrown": stock_after - stock_before, "stock": stock_after,
                    "collapsed": collapsed is not None})
 
+    new_actions = tuple((state.tick, aid, resource[aid].kind, granted.get(aid, 0.0))
+                        for aid in sorted(resource))
+
     return replace(state, tick=tick, grid=grid, agents=agents,
                    messages=state.messages + tuple(new_messages),
+                   stock_log=state.stock_log + (stock_after,),
+                   action_log=state.action_log + new_actions,
                    collapsed_at=collapsed), events

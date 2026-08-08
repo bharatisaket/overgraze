@@ -14,8 +14,8 @@ import numpy as np
 
 from world import (CAP, CAPACITY, COLLAPSE_FLOOR, N, PLANT, PUNISH_COST,
                    PUNISH_FINE, SAY_LIMIT, TAKE, TICKS, Action, apply_actions,
-                   initial_state, listen, look, neighbours_mean, regrow,
-                   resolve_cell, rng_for, status)
+                   history, initial_state, listen, look, neighbours_mean,
+                   regrow, resolve_cell, rng_for, status)
 import harness
 
 
@@ -276,7 +276,8 @@ class TestSpeech(unittest.TestCase):
         self.assertEqual(listen(s1, 1)[0]["text"], "stop at a third")
 
     def test_message_is_not_heard_out_of_range(self):
-        s = at(at(st(("greedy", "greedy")), 0, 0, 0), 1, 5, 5)
+        # speech is grid-wide by default, so range has to be set to test it
+        s = at(at(st(("greedy", "greedy"), speech_radius=1), 0, 0, 0), 1, 5, 5)
         s1, ev = apply_actions(s, [Action(0, "say", text="hello")])
         self.assertEqual([e["heard_by"] for e in ev if e["type"] == "speech"], [[]])
         self.assertEqual(listen(s1, 1), [])
@@ -309,6 +310,83 @@ class TestSpeech(unittest.TestCase):
         self.assertEqual(s1.messages[0].speaker, 0)
 
 
+class TestSpeechReach(unittest.TestCase):
+    """Speech is grid-wide by default; range is a per-run switch."""
+
+    def test_broadcast_reaches_the_far_corner(self):
+        s = at(at(st(("greedy", "greedy")), 0, 0, 0), 1, 5, 5)
+        s1, ev = apply_actions(s, [Action(0, "say", text="lets stop at a third")])
+        self.assertEqual([e["heard_by"] for e in ev if e["type"] == "speech"], [[1]])
+        self.assertEqual(listen(s1, 1)[0]["text"], "lets stop at a third")
+
+    def test_radius_limits_reach_when_set(self):
+        s = at(at(st(("greedy", "greedy"), speech_radius=1), 0, 0, 0), 1, 5, 5)
+        s1, ev = apply_actions(s, [Action(0, "say", text="too far")])
+        self.assertEqual([e["heard_by"] for e in ev if e["type"] == "speech"], [[]])
+        self.assertEqual(listen(s1, 1), [])
+
+    def test_listening_is_fixed_at_speaking_time_not_current_position(self):
+        """Walking to where a conversation happened must not reveal it."""
+        s = at(at(st(("greedy", "greedy"), speech_radius=1), 0, 0, 0), 1, 5, 5)
+        s1, _ = apply_actions(s, [Action(0, "say", text="a secret")])
+        self.assertEqual(listen(s1, 1), [])
+        walked = at(s1, 1, 0, 1)              # agent 1 walks right next door
+        self.assertEqual(listen(walked, 1), [], "past messages leaked by position")
+
+    def test_audience_is_recorded_on_the_message(self):
+        s = at(at(st(("greedy", "greedy")), 0, 2, 2), 1, 2, 3)
+        s1, _ = apply_actions(s, [Action(0, "say", text="hello")])
+        self.assertEqual(s1.messages[0].heard_by, (1,))
+
+
+class TestHistory(unittest.TestCase):
+    def test_own_actions_are_recorded(self):
+        s = st()
+        s1, _ = apply_actions(s, [Action(0, "harvest", amount=0.4)])
+        s2, _ = apply_actions(s1, [Action(0, "harvest", amount=0.3)])
+        h = history(s2, 0)
+        self.assertEqual([m["action"] for m in h["my_actions"]], ["harvest", "harvest"])
+        self.assertAlmostEqual(h["my_recent_harvest"], 0.7)
+
+    def test_history_is_per_agent(self):
+        s = st(("greedy", "greedy"))
+        s1, _ = apply_actions(s, [Action(0, "harvest", amount=0.4)])
+        self.assertEqual(history(s1, 1)["my_actions"], [])
+
+    def test_commons_series_tracks_stock(self):
+        s = st()
+        s1, _ = apply_actions(s, [Action(0, "harvest", amount=TAKE)])
+        h = history(s1, 0)
+        self.assertEqual(h["commons_capacity"], CAPACITY)
+        self.assertEqual(len(h["commons"]), 2)          # start plus one tick
+        self.assertAlmostEqual(h["commons_now"], s1.stock, places=3)   # reported rounded
+
+    def test_falling_commons_is_reported_as_falling(self):
+        ep_state = initial_state(0, ["greedy"] * 4, rule="global", r=0.05)
+        import harness
+        streams = harness.agent_streams(0, 4)
+        for _ in range(12):
+            acts = [a2 for a in ep_state.agents
+                    for a2 in harness.greedy(ep_state, a, streams[a.id])]
+            ep_state, _ = apply_actions(ep_state, acts)
+        h = history(ep_state, 0)
+        self.assertEqual(h["commons_trend"], "falling")
+        self.assertIn("ticks_to_collapse_at_this_rate", h)
+
+    def test_share_stock_off_withholds_the_commons(self):
+        s = st(share_stock=False)
+        s1, _ = apply_actions(s, [Action(0, "harvest", amount=0.4)])
+        h = history(s1, 0)
+        self.assertNotIn("commons", h)
+        self.assertIn("my_actions", h)          # own history is always available
+
+    def test_window_limits_how_far_back_an_agent_sees(self):
+        s = st()
+        for _ in range(8):
+            s, _ = apply_actions(s, [Action(0, "harvest", amount=0.1)])
+        self.assertEqual(len(history(s, 0, window=3)["my_actions"]), 3)
+
+
 class TestVision(unittest.TestCase):
     def test_look_shows_only_cells_in_range(self):
         s = at(st(), 0, 2, 2)
@@ -335,7 +413,8 @@ class TestVision(unittest.TestCase):
         r = status(s, 0)["rules"]
         self.assertEqual(r["take_limit"], TAKE)
         self.assertTrue(r["punish"])
-        self.assertTrue(r["ends_if_resource_exhausted"])
+        self.assertEqual(r["run_ends_below"], COLLAPSE_FLOOR)
+        self.assertEqual(r["speech_reaches"], "everyone")
 
 
 class TestPunish(unittest.TestCase):
