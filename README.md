@@ -288,6 +288,45 @@ Errors come back as results rather than protocol faults, because they are things
 an agent has to reason about: *you already acted this tick*, *nothing left in
 this cell*, *that would leave the world*, *that agent is out of range*.
 
+## What is hard about this MCP server
+
+Most MCP servers are stateless wrappers: a tool call arrives, an API is called,
+a result comes back, nothing is shared between callers. This one is not that,
+and the differences are where the engineering is.
+
+**Four authenticated clients share one world.** Every seat has its own bearer
+token mapping to a player row, and all four are connected at once to the same
+run. A tool call is answerable from the token and the database alone.
+
+**A tool call blocks on other clients.** The engine resolves a whole tick at
+once; MCP calls arrive one client at a time. So an action is an *intent* — it
+is written down, the caller blocks, and the tick resolves only when every seat
+has committed, or a barrier times out and the stragglers are recorded as `noop`.
+Each caller is then handed the part of the outcome that belongs to it. A harvest
+returns **less than it asked for** when someone else wanted the same cell, which
+is the honest answer rather than an error.
+
+**No session state, by design.** The 2026-07-28 spec removed protocol-level
+sessions, so the server is written as though there is none — because there is
+not. World state is JSON in SQLite; a restart costs an in-flight barrier wait,
+not a run. There is a test asserting a fresh connection sees the same world.
+
+**Errors are content, not faults.** *You already acted this tick*, *nothing left
+in this cell*, *that agent is out of range* come back as results, because they
+are things a model has to read and reason about rather than exceptions for a
+client library to swallow.
+
+**The consequence for scale:** the barrier lives in process memory, so the
+server runs as exactly one instance. Two replicas would resolve their own ticks
+against the same database and clients would desynchronise silently. Moving the
+barrier into the database is the prerequisite for scaling out — see the note in
+the Dockerfile.
+
+Built on `mcp` 2.0 (`MCPServer`, streamable HTTP), with `server.py` deliberately
+thin: it identifies the caller, calls the engine, and returns what happened.
+There is no game logic in the protocol layer, which is the whole point of having
+built the engine first.
+
 ## Deploying it
 
 ```bash

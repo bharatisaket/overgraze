@@ -42,11 +42,12 @@ from mcp.client.streamable_http import streamable_http_client
 import dispositions
 
 # ── model configuration ───────────────────────────────────────────────────────
-# Opus 5 is the default because model choice is the operator's call, not a
-# default that quietly optimises for price. Pass --model claude-haiku-4-5 for a
-# run that costs roughly a fifth as much per token; a foraging decision is not a
-# reasoning benchmark, so that is a very reasonable trade for a long sweep.
-DEFAULT_MODEL = "claude-opus-5"
+# Haiku by the operator's explicit choice, not as a silent cost default. A tick
+# is a small, well-specified decision, and the Phase 6 ablation matrix is ~100
+# runs x 4 agents x 40 ticks -- roughly 16,000 calls, where a 5x token price
+# difference decides whether the study happens at all. Pass --model
+# claude-opus-5 for a showcase run, or when the traces read as thoughtless.
+DEFAULT_MODEL = "claude-haiku-4-5"
 
 # $ per million tokens, for the in-code budget. Update alongside the model list.
 PRICING = {
