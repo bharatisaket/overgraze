@@ -618,18 +618,20 @@
 
   <footer>
     <div>
-      Every figure is produced by the simulation itself — <code>export_viz.py</code> replays
-      <code>compare.run()</code> and records each tick, and the replay is asserted identical to
-      the original for all 30 configurations. Nothing here re-implements the rules in the browser.
+      Every figure is produced by the engine itself — <code>export_viz.py</code> drives
+      <code>world.apply_actions</code> through the scripted harness and records each tick.
+      Nothing here re-implements the rules in the browser.
     </div>
     <div>
-      Summary statistics average 40 seeds; the map plays back seed 0. Movement ties and
-      per-tick activation order are the two random draws.
+      Summary statistics average 40 seeds; the map plays back seed 0. Movement ties are
+      the only random draw: each forager has its own seeded stream, so the order they are
+      processed in cannot influence a run.
     </div>
     <div>
-      <strong>Overgraze</strong> — foragers act sequentially within a tick rather than
-      submitting simultaneous intents, and no single regrowth rate is designated as the
-      default. Both are deliberate; see the README for what they cost.
+      <strong>Overgraze</strong> — foragers submit intents and the engine resolves every
+      intent for a tick together, so nobody acts out of turn. When two foragers want the
+      same cell, it is split max-min fair: equal shares, with surplus from a small ask
+      flowing back to whoever still wants more, never more than the cell holds.
     </div>
   </footer>
 </div>

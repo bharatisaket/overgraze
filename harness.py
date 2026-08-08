@@ -64,6 +64,13 @@ MIXES = {
 
 
 # ── episode runner ────────────────────────────────────────────────────────────
+# Regrowth rates the visualiser sweeps. Chosen from `--sweep` against the
+# scripted agents: 0.035-0.12 is the band where greedy collapses and cautious
+# survives, and 0.20 sits past it so the charts show both sides of the line.
+SWEEP_R = [0.035, 0.05, 0.08, 0.12, 0.20]
+SEEDS = 40
+
+
 @dataclass
 class Episode:
     seed: int
@@ -76,6 +83,9 @@ class Episode:
     stock: list[float]
     contested: int
     events: list[dict]
+    frames: list = None       # grid per tick, when keep_frames
+    positions: list = None    # [(y, x), ...] per tick, when keep_frames
+    cum: list = None          # per-agent cumulative score per tick
 
 
 def agent_streams(seed: int, n: int) -> list[np.random.Generator]:
@@ -90,13 +100,17 @@ def agent_streams(seed: int, n: int) -> list[np.random.Generator]:
 
 
 def run_episode(seed: int, mix: str, rule: str = "global", r: float = 0.15,
-                keep_events: bool = False) -> Episode:
+                keep_events: bool = False, keep_frames: bool = False) -> Episode:
     kinds = MIXES[mix]
     state = initial_state(seed, kinds, rule=rule, r=r)
     stock = [state.stock]
     log: list[dict] = []
     contested = 0
     streams = agent_streams(seed, len(kinds))
+
+    frames = [state.grid.copy()] if keep_frames else None
+    positions = [[(a.y, a.x) for a in state.agents]] if keep_frames else None
+    cum = [[a.score for a in state.agents]] if keep_frames else None
 
     while not state.done:
         actions = [POLICIES[a.kind](state, a, streams[a.id]) for a in state.agents]
@@ -105,12 +119,17 @@ def run_episode(seed: int, mix: str, rule: str = "global", r: float = 0.15,
         stock.append(state.stock)
         if keep_events:
             log.extend(events)
+        if keep_frames:
+            frames.append(state.grid.copy())
+            positions.append([(a.y, a.x) for a in state.agents])
+            cum.append([a.score for a in state.agents])
 
     survived = state.collapsed_at if state.collapsed_at is not None else TICKS
     return Episode(seed=seed, rule=rule, r=r, mix=mix, survived=survived,
                    harvest=sum(a.score for a in state.agents),
                    scores=[a.score for a in state.agents], stock=stock,
-                   contested=contested, events=log)
+                   contested=contested, events=log,
+                   frames=frames, positions=positions, cum=cum)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

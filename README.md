@@ -78,37 +78,42 @@ this project makes.
 
 ## Results
 
-Means over 40 seeds. `4G` = four greedy, `4C` = four cautious, `2/2` = mixed.
+From `world.py`, means over 40 seeds. `4G` = four greedy, `4C` = four cautious,
+`2/2` = mixed. "contested" counts cells two or more foragers targeted on the
+same tick — the case the engine has to arbitrate.
 
-| rule | r | survived 4G | harvest 4G | harvest 4C | greedy each (2/2) | cautious each (2/2) | dilemma |
-|---|---|---|---|---|---|---|---|
-| global | 0.11 | 33.2 | 56.3 | 101.6 | 42.4 | 9.0 | no |
-| global | 0.13 | 38.8 | 64.5 | 113.9 | 51.0 | 13.4 | no |
-| global | 0.15 | 46.9 | 75.9 | 125.1 | 53.8 | 20.0 | no |
-| global | 0.30 | 100.0 | 220.0 | 175.3 | 55.0 | 42.8 | no |
-| global | 0.50 | 100.0 | 220.0 | 193.9 | 55.0 | 48.3 | no |
-| neighbour | 0.11 | 25.9 | 46.7 | 85.6 | 23.2 | 7.1 | **yes** |
-| neighbour | 0.13 | 28.2 | 50.4 | 96.4 | 29.2 | 8.1 | **yes** |
-| neighbour | 0.15 | 30.6 | 54.7 | 106.5 | 38.9 | 9.5 | no |
-| neighbour | 0.30 | 100.0 | 192.4 | 160.0 | 54.9 | 37.0 | no |
-| neighbour | 0.50 | 100.0 | 220.0 | 187.8 | 55.0 | 46.5 | no |
+| rule | r | survived 4G | harvest 4G | harvest 4C | greedy each (2/2) | cautious each (2/2) | contested | dilemma |
+|---|---|---|---|---|---|---|---|---|
+| global | 0.035 | 34.5 | 41.0 | 49.7 | 16.1 | 6.5 | 56 | **yes** |
+| global | 0.05 | 46.5 | 46.2 | 61.8 | 20.1 | 7.1 | 76 | no |
+| global | 0.08 | 67.6 | 63.6 | 85.6 | 26.1 | 13.4 | 94 | no |
+| global | 0.12 | 100.0 | 107.6 | 111.5 | 35.4 | 21.0 | 115 | no |
+| global | 0.20 | 100.0 | 158.0 | 142.3 | 40.3 | 34.7 | 122 | no |
+| neighbour | 0.035 | 31.9 | 39.8 | 48.9 | 14.3 | 6.8 | 44 | **yes** |
+| neighbour | 0.05 | 42.9 | 44.0 | 59.8 | 17.1 | 7.7 | 66 | **yes** |
+| neighbour | 0.08 | 55.6 | 56.5 | 80.6 | 23.1 | 10.8 | 84 | no |
+| neighbour | 0.12 | 87.6 | 85.5 | 103.9 | 31.2 | 18.1 | 114 | no |
+| neighbour | 0.20 | 100.0 | 147.3 | 136.6 | 39.3 | 31.9 | 118 | no |
 
-**The dilemma occupies a narrow band.** At r ≥ 0.30 regrowth simply outruns
-extraction: greedy wins individually *and* collectively (220 vs 175), so
-defection is just correct and there is no tension to study. Under the `global`
-rule the pooled regrowth bails out the mixed group, so partial cooperation is a
-stable escape hatch. Only `neighbour` at r = 0.11 and r = 0.13 produces the full
-structure.
+**A greedy forager always out-earns a cautious one.** Across every rate, in
+every mixed group, the individual temptation holds — 2.5× at r = 0.035, still
+1.2× at r = 0.20. Defection is never individually irrational here.
 
-**`neighbour` / r = 0.13 is the sharpest case.** All-cautious survives all 100
-ticks. All-greedy collapses at tick 28. And the mixed group *also* collapses, at
-tick 77 — so cooperation has a critical mass: two cooperators cannot offset two
-defectors, and each greedy forager still personally earns ~3.6× what a cautious
-one does. Restraint there earns those two foragers nothing and saves nothing.
+**The collective picture flips at r ≈ 0.12–0.20.** Below it a group of cautious
+foragers out-harvests a group of greedy ones (49.7 vs 41.0 at r = 0.035); above
+it regrowth outruns extraction and greedy wins outright (158.0 vs 142.3 at
+r = 0.20). Only where both conditions hold at once — the greedy advantage *and*
+a collapsing commons — is this a dilemma: `global` at 0.035, and `neighbour` at
+0.035 and 0.05.
 
-**The damage is permanent within a run.** After an all-greedy run at r = 0.15,
-22 of the 36 cells (`global`) or 27 (`neighbour`) sit at ~0, and *zero* cells
-have recovered above 0.5 under either rule.
+**Local regrowth is less forgiving than pooled regrowth.** At the same rate the
+`neighbour` rule collapses sooner and harvests less, because a stripped cell can
+only recover from surviving neighbours. Pooled regrowth subsidises the damage
+from the health of the whole map.
+
+**Contention rises with abundance.** Foragers crowd the same cells more often
+when there is more to crowd over — 44 contested cells per run at the lowest
+rate, 122 at the highest.
 
 ## The visualiser
 
@@ -122,23 +127,19 @@ table of every number. The map draws each cell's resource as tufts of grass that
 get eaten one by one, with greedy foragers as goats and cautious ones as sheep —
 distinguished by silhouette as well as colour.
 
-`export_viz.py` replays `compare.run()` rather than reimplementing it, and its
-recorded loop is asserted identical to the original across all 30 configurations.
-The picture cannot drift from the code.
+`export_viz.py` drives `world.apply_actions` through the scripted harness rather
+than reimplementing anything, so the picture cannot drift from the engine.
 
 Published (private): https://claude.ai/code/artifact/3a83f628-6372-451a-aceb-c07c7d6d7559
 
 ## Two engines
 
-The project currently contains **two** simulations, and they do not agree.
+`world.py` is canonical. The results above and the visualiser both come from it.
 
-`compare.py` is the original: agents act sequentially within a tick, mutating
-the grid in place. Everything above — the results table, `payoff.py`, and the
-published visualiser — describes this engine.
-
-`world.py` is the Phase 1 rebuild: a pure library with a simultaneous tick
-model. Agents submit intents, `apply_actions(state, actions) -> state` resolves
-them all against the same tick-N snapshot, and only then advances.
+`compare.py` is the original engine, kept for comparison: agents act
+sequentially within a tick, mutating the grid in place. It still runs, and
+`payoff.py` still reports on it, but its numbers describe a different world —
+notably a dilemma band at r ≈ 0.11–0.13 rather than r ≈ 0.035–0.05.
 
 ```bash
 python -m unittest test_world -v          # 30 tests
@@ -158,44 +159,37 @@ python harness.py --sweep                 # tune regrowth
 
 **The regrowth rate does not transfer between them.** Simultaneous choice makes
 foragers pile onto the same rich cell instead of the leader stripping it and the
-rest fanning out, and concentrated damage is far easier for regrowth to repair.
-Retuned against scripted agents, `r ≈ 0.05` reproduces the intended behaviour
-under `world.py`: all-greedy collapses at ~42 ticks, all-cautious survives all
-100, and cautious out-harvests greedy 61.4 to 45.0.
-
-Migrating `compare.py`, the results table, and the visualiser onto `world.py`
-is not done. Until it is, treat the numbers above as describing the legacy
-engine.
+rest fanning out, and concentrated damage is easier for regrowth to repair — so
+the same rate collapses far less readily. `world.py` was retuned from scratch
+with `harness.py --sweep`.
 
 ## Design decisions and known deviations
 
-**The tick model is sequential, not simultaneous.** Foragers act one at a time
-and mutate the grid in place, so the second forager chooses against a grid the
-first has already eaten from. A design spec calling for simultaneous resolution
-(all agents read the same tick-N snapshot, submit intents, the server resolves
-them together) is *not* implemented, deliberately. It was prototyped and
-measured, and it is not a cosmetic fairness fix — under simultaneous choice the
-foragers pile onto the same richest cell instead of the leader stripping it and
-the rest fanning out. Concentrated damage is far easier for regrowth to repair,
-so collapses largely stop happening: all-greedy at `global`/0.11 goes from
-surviving 33 ticks to 99, and `neighbour`/0.13 stops being a dilemma at all.
-Adopting it would be defensible, but it invalidates every number above.
+**Performance is short of target.** The Phase 1 brief wants 1000 runs a second;
+the engine does roughly 68 full-length episodes a second, so 1000 takes ~15s.
+Profiling put a third of the cost in per-tick RNG construction, fixed by giving
+each agent one spawned stream per episode (2.4× faster). What remains is numpy's
+per-call overhead on a 6×6 grid, where 36 floats do not amortise a ~1µs call.
+Closing the gap means dropping numpy for plain lists in the hot path, or
+vectorising across episodes. The Phase 1 gate — 100 simulations to CSV — passes
+in 1.2s regardless.
 
-**No default `r` is designated.** Tuning by hand against a scalar pool under a
-constant drain of 4 × 0.55 gives r ≈ 0.187 for a ~40-tick collapse. The agent
-sim needs r ≈ 0.133 for the same result, because foragers realise only ~1.64 of
-the assumed 2.20 drain per tick — cells fall below `TAKE`, and hill-climbing
-crowds them onto the same cells. Rather than pick one, the sweep brackets both.
+**The contention rule is a modelling choice.** When foragers target one cell,
+`resolve_cell` splits it max-min fair. Proportional-to-ask, random priority, or
+all-or-nothing would each give different dynamics. Max-min fair was chosen
+because it is order-independent and conserves exactly, both of which are
+testable properties; it is not the only defensible rule.
 
-**Seed counts are inconsistent** between scripts: `compare.py` uses 12,
-`payoff.py` 20, `export_viz.py` 40. Numbers therefore differ slightly between
-outputs. Worth unifying.
+**Two engines coexist.** `compare.py` is kept rather than deleted so the
+sequential results stay reproducible, but it duplicates the rules. Only
+`world.py` has tests. If `compare.py` stops earning its keep, delete it rather
+than let the two drift.
 
-**`Agent.act` has an unreachable third branch** (a `cell > 0.3` threshold
-policy). The sweep only ever builds `greedy` and `cautious` foragers.
+**The legacy engine's known flaws are unfixed** — `Agent.act` has an unreachable
+third branch, and `neighbours_mean` divides by 9 even at edges, so edge cells
+systematically under-regrow. Both are corrected in `world.py`; neither is worth
+repairing in code that is no longer canonical.
 
-**`neighbours_mean` divides by 9 everywhere**, including at edges where part of
-the neighbourhood is zero padding — so edge cells systematically under-regrow
-under the `neighbour` rule, biasing the map toward a rich centre and dead rim.
-Left as-is because it is load-bearing for the spatial story, but it is a
-modelling choice, not a neutral one.
+**Scripted policies are deliberately dumb.** `greedy`, `cautious` and `random`
+hill-climb or wander; none of them model, negotiate, or anticipate. They exist
+to make the world cheap to tune and test, not to be interesting agents.

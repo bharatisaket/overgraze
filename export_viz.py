@@ -1,60 +1,40 @@
 """
-Export simulation data for the HTML visualiser.
+Export simulation data for the visualiser.
 
-Replays the same simulation compare.run() does -- importing Agent, regrow and
-the constants from compare so the rules live in exactly one place -- but
-records the grid and agent positions at every tick instead of only the totals.
-Writes viz_data.json, which gets embedded into the visualiser page.
+Runs the Phase 1 engine (`world.py`) through the scripted harness and records
+every tick, then writes viz_data.json for build_viz.py to embed.
 
-The recorded loop below must stay a faithful copy of compare.run(): same rng
-draw order (permutation, then one draw per agent action), same regrow-then-
-check-collapse ordering. If run() changes, change this too.
+Nothing here reimplements the rules: episodes come from `harness.run_episode`,
+which drives `world.apply_actions`. The picture cannot drift from the engine.
+
+    python export_viz.py && python build_viz.py
 """
 
-import json
 import base64
+import json
+
 import numpy as np
 
-from compare import Agent, regrow, N, CAP, TICKS, TAKE, R_VALUES, SEEDS
+import harness
+from world import CAP, N, TAKE, TICKS
 
 REPLAY_SEED = 0   # the single run shown in the grid player
 
+# (data key, label, harness mix name) -- the data keys are what the page's
+# colour map keys off, so they stay stable across engine changes.
 MIXES = [
-    ("greedy4",   "4 greedy",              ["greedy"]*4),
-    ("cautious4", "4 cautious",            ["cautious"]*4),
-    ("mixed",     "2 greedy / 2 cautious", ["greedy", "greedy", "cautious", "cautious"]),
+    ("greedy4",   "4 greedy",              "greedy"),
+    ("cautious4", "4 cautious",            "cautious"),
+    ("mixed",     "2 greedy / 2 cautious", "mixed"),
 ]
 
-
-def run_recorded(rule, r, mix, seed):
-    """compare.run(), but keeping every intermediate grid and agent position."""
-    rng = np.random.default_rng(seed)
-    g = np.full((N, N), CAP)
-    starts = [(0, 0), (5, 0), (0, 5), (5, 5)]
-    ags = [Agent(k, sx, sy, rng) for k, (sx, sy) in zip(mix, starts)]
-
-    grids = [g.copy()]
-    poss = [[(a.y, a.x) for a in ags]]
-    scores = [[0.0]*len(ags)]
-
-    survived = TICKS
-    for t in range(TICKS):
-        for i in rng.permutation(len(ags)):
-            ags[i].act(g)
-        g = regrow(g, rule, r)
-        grids.append(g.copy())
-        poss.append([(a.y, a.x) for a in ags])
-        scores.append([a.score for a in ags])
-        if g.sum() < 0.05*N*N and survived == TICKS:
-            survived = t
-            break
-    return survived, [a.score for a in ags], grids, poss, scores
+RULES = ["global", "neighbour"]
 
 
 def encode_grid(g):
     """36 cells -> 36 bytes -> base64, to keep the embedded payload small."""
-    b = np.clip(np.round(g/CAP*255), 0, 255).astype(np.uint8).ravel().tobytes()
-    return base64.b64encode(b).decode('ascii')
+    b = np.clip(np.round(g / CAP * 255), 0, 255).astype(np.uint8).ravel().tobytes()
+    return base64.b64encode(b).decode("ascii")
 
 
 def encode_pos(p):
@@ -63,25 +43,26 @@ def encode_pos(p):
 
 
 data = {
-    "n": N, "cap": CAP, "ticks": TICKS, "take": TAKE, "seeds": SEEDS,
+    "n": N, "cap": CAP, "ticks": TICKS, "take": TAKE, "seeds": harness.SEEDS,
     "replaySeed": REPLAY_SEED,
-    "rValues": R_VALUES,
-    "rules": ["global", "neighbour"],
-    "mixes": [{"key": k, "label": lab, "kinds": kinds} for k, lab, kinds in MIXES],
+    "rValues": harness.SWEEP_R,
+    "rules": RULES,
+    "mixes": [{"key": k, "label": lab, "kinds": harness.MIXES[m]}
+              for k, lab, m in MIXES],
     "sweep": {},
     "runs": {},
 }
 
-for rule in data["rules"]:
+for rule in RULES:
     data["sweep"][rule] = {}
-    for r in R_VALUES:
+    for r in harness.SWEEP_R:
         rk = str(r)
         data["sweep"][rule][rk] = {}
         for key, label, mix in MIXES:
-            res = [run_recorded(rule, r, mix, s) for s in range(SEEDS)]
-            sv = np.array([x[0] for x in res], dtype=float)
-            hv = np.array([sum(x[1]) for x in res], dtype=float)
-            per = np.array([x[1] for x in res], dtype=float)
+            eps = [harness.run_episode(s, mix, rule, r) for s in range(harness.SEEDS)]
+            sv = np.array([e.survived for e in eps], dtype=float)
+            hv = np.array([e.harvest for e in eps], dtype=float)
+            per = np.array([e.scores for e in eps], dtype=float)
 
             entry = {
                 "survMean": round(float(sv.mean()), 2),
@@ -89,24 +70,25 @@ for rule in data["rules"]:
                 "harvMean": round(float(hv.mean()), 2),
                 "harvSd":   round(float(hv.std()), 2),
                 "collapseRate": round(float((sv < TICKS).mean()), 3),
+                "contested": round(float(np.mean([e.contested for e in eps])), 1),
             }
             if key == "mixed":
                 entry["greedyEach"] = round(float(per[:, :2].mean()), 2)
                 entry["cautiousEach"] = round(float(per[:, 2:].mean()), 2)
             data["sweep"][rule][rk][key] = entry
 
-            # One recorded run per configuration for the grid player.
-            sur, sc, grids, poss, scores = run_recorded(rule, r, mix, REPLAY_SEED)
+            ep = harness.run_episode(REPLAY_SEED, mix, rule, r, keep_frames=True)
             data["runs"][f"{rule}|{rk}|{key}"] = {
-                "survived": sur,
-                "scores": [round(float(v), 2) for v in sc],
-                "frames": [encode_grid(x) for x in grids],
-                "pos": [encode_pos(p) for p in poss],
-                "cum": [[round(float(v), 2) for v in row] for row in scores],
+                "survived": ep.survived,
+                "scores": [round(float(v), 2) for v in ep.scores],
+                "frames": [encode_grid(g) for g in ep.frames],
+                "pos": [encode_pos(p) for p in ep.positions],
+                "cum": [[round(float(v), 2) for v in row] for row in ep.cum],
             }
 
 with open("viz_data.json", "w") as f:
     json.dump(data, f, separators=(",", ":"))
 
 n_frames = sum(len(v["frames"]) for v in data["runs"].values())
-print(f"wrote viz_data.json: {len(data['runs'])} runs, {n_frames} frames")
+print(f"wrote viz_data.json: {len(data['runs'])} runs, {n_frames} frames "
+      f"(engine: world.py, simultaneous ticks)")
