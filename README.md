@@ -18,30 +18,39 @@ Either one alone is not a dilemma. Most parameter settings turn out not to be.
 ## Quick start
 
 ```bash
-python compare.py
+python harness.py --runs 100 --out stock.csv
 ```
 
-Sweeps both regrowth rules × five regrowth rates × three group compositions and
-prints how long the commons lasted and how much the group harvested.
+Runs 100 scripted episodes and writes stock over time, plus survival and
+harvest summaries to stdout.
 
 ```bash
-python payoff.py
+python harness.py --sweep
 ```
 
-Breaks the mixed group down to per-agent scores — does defection actually pay? —
-and counts dead vs recovered cells after an all-greedy run.
+Scans regrowth rates for the band where a group of greedy foragers collapses
+the commons while a group of cautious ones survives.
+
+```bash
+python -m unittest test_world -v
+```
+
+30 tests, most of them on the rules for resolving what happens when two
+foragers want the same cell on the same tick.
 
 ## What's in here
 
 | File | What it is |
 |---|---|
-| `compare.py` | The simulation, plus the headline sweep. Everything else imports from it. |
-| `payoff.py` | Per-agent payoffs and dead-zone analysis. Imports `run`, `N`, `CAP`, `R_VALUES`. |
-| `export_viz.py` | Replays `compare.run()` recording every tick → `viz_data.json`. |
+| `world.py` | The engine. Pure functions, no I/O: `apply_actions(state, actions) -> (state, events)`. |
+| `harness.py` | Scripted policies, the episode runner, and the CLI. Imports `world`. |
+| `test_world.py` | Unit tests for the engine, weighted toward the contention rules. |
+| `export_viz.py` | Runs the harness recording every tick → `viz_data.json`. |
 | `viz_template.html` | The visualiser page, with a `/*__VIZ_DATA__*/` placeholder. |
 | `build_viz.py` | Injects the data into the template → self-contained `overgraze.html`. |
 
-`viz_data.json` and `overgraze.html` are build outputs and are gitignored.
+`viz_data.json`, `overgraze.html` and any `.csv` are build outputs and are
+gitignored.
 
 ## The model
 
@@ -132,36 +141,25 @@ than reimplementing anything, so the picture cannot drift from the engine.
 
 Published (private): https://claude.ai/code/artifact/3a83f628-6372-451a-aceb-c07c7d6d7559
 
-## Two engines
+## History
 
-`world.py` is canonical. The results above and the visualiser both come from it.
+An earlier engine (`compare.py`, `payoff.py`) ran agents sequentially within a
+tick, mutating the grid in place, so the second forager chose against a grid the
+first had already eaten from. It could not represent two foragers harvesting one
+cell on the same tick at all, and it had no tests.
 
-`compare.py` is the original engine, kept for comparison: agents act
-sequentially within a tick, mutating the grid in place. It still runs, and
-`payoff.py` still reports on it, but its numbers describe a different world —
-notably a dilemma band at r ≈ 0.11–0.13 rather than r ≈ 0.035–0.05.
+It was replaced rather than repaired, and deleted once `world.py` covered it —
+`git log` has it if you need the old numbers. Two things worth carrying forward:
 
-```bash
-python -m unittest test_world -v          # 30 tests
-python harness.py --runs 100 --out stock.csv
-python harness.py --sweep                 # tune regrowth
-```
-
-| | `compare.py` (legacy) | `world.py` (Phase 1) |
-|---|---|---|
-| tick model | sequential, in place | simultaneous intents |
-| same-cell contention | impossible to express | max-min fair split |
-| purity | mutates | returns new state |
-| RNG | shared, order-sensitive | per-agent stream, order-independent |
-| event log | none | append-only, every action and delta |
-| edge regrowth | divides by 9 | divides by true neighbour count |
-| collapse band | r ≈ 0.11–0.13 | r ≈ 0.035–0.12 |
-
-**The regrowth rate does not transfer between them.** Simultaneous choice makes
-foragers pile onto the same rich cell instead of the leader stripping it and the
-rest fanning out, and concentrated damage is easier for regrowth to repair — so
-the same rate collapses far less readily. `world.py` was retuned from scratch
-with `harness.py --sweep`.
+- **Its regrowth rate does not transfer.** The old dilemma band was r ≈ 0.11–0.13.
+  Simultaneous choice makes foragers pile onto the same rich cell instead of the
+  leader stripping it and the rest fanning out, and concentrated damage is easier
+  for regrowth to repair — so the same rate collapses far less readily. `world.py`
+  was retuned from scratch and lands at r ≈ 0.035–0.05.
+- **Its edge cells were biased.** `neighbours_mean` divided by 9 everywhere,
+  including at edges where part of the neighbourhood was zero padding, so rim
+  cells systematically under-regrew. `world.py` divides by the true neighbour
+  count.
 
 ## Design decisions and known deviations
 
@@ -179,16 +177,6 @@ in 1.2s regardless.
 all-or-nothing would each give different dynamics. Max-min fair was chosen
 because it is order-independent and conserves exactly, both of which are
 testable properties; it is not the only defensible rule.
-
-**Two engines coexist.** `compare.py` is kept rather than deleted so the
-sequential results stay reproducible, but it duplicates the rules. Only
-`world.py` has tests. If `compare.py` stops earning its keep, delete it rather
-than let the two drift.
-
-**The legacy engine's known flaws are unfixed** — `Agent.act` has an unreachable
-third branch, and `neighbours_mean` divides by 9 even at edges, so edge cells
-systematically under-regrow. Both are corrected in `world.py`; neither is worth
-repairing in code that is no longer canonical.
 
 **Scripted policies are deliberately dumb.** `greedy`, `cautious` and `random`
 hill-climb or wander; none of them model, negotiate, or anticipate. They exist
