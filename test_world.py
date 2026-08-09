@@ -525,15 +525,26 @@ class TestHistory(unittest.TestCase):
 
 
 class TestVision(unittest.TestCase):
-    def test_look_shows_only_cells_in_range(self):
-        s = at(st(), 0, 2, 2)
-        v = look(s, 0)
-        self.assertEqual(len(v["cells"]), 9)                 # 3x3 at radius 1
-        self.assertNotIn((5, 5), v["cells"])
+    def test_the_whole_pasture_is_visible(self):
+        """The land is a small open field; you can see across it."""
+        s = at(st(("greedy", "greedy")), 0, 0, 0)
+        g = look(s, 0)["grid"]
+        self.assertEqual(len(g), N)
+        self.assertTrue(all(len(row) == N for row in g))
 
-    def test_look_is_clipped_at_the_edge(self):
-        s = st()
-        self.assertEqual(len(look(s, 0)["cells"]), 4)        # corner sees 2x2
+    def test_who_you_can_see_is_still_range_limited(self):
+        """Seeing the land and seeing each other are different things now."""
+        near = at(at(st(("greedy", "greedy")), 0, 1, 1), 1, 1, 2)
+        far = at(at(st(("greedy", "greedy")), 0, 0, 0), 1, 3, 3)
+        self.assertEqual(len(look(near, 0)["agents"]), 1)
+        self.assertEqual(look(far, 0)["agents"], [],
+                         "vision should still bound who you can observe")
+
+    def test_the_grid_reports_real_values(self):
+        s = st(("greedy", "greedy"))
+        thin = s.grid.copy(); thin[2, 3] = 0.25
+        s = type(s)(**{**s.__dict__, "grid": thin})
+        self.assertAlmostEqual(look(s, 0)["grid"][2][3], 0.25)
 
     def test_look_reports_nearby_agents_only(self):
         s = at(at(st(("greedy", "greedy")), 0, 2, 2), 1, 0, 0)

@@ -301,14 +301,35 @@ def visible_cells(state: State, agent_id: int) -> list[tuple[int, int]]:
 
 
 def look(state: State, agent_id: int) -> dict:
-    """What this agent can see from where it stands -- not the whole grid."""
+    """The land, and whoever is near enough to see.
+
+    Two different things used to share one radius. The pasture is a small open
+    field -- you can see across it -- but who took what while you were on the
+    other side is genuinely unobservable, and that second thing is what makes
+    local monitoring, unverifiable claims and evidence-based punishment work.
+    Tying both to `vision` meant an agent in a corner was blind to three
+    quarters of the board, so its movement was near-random search and any
+    competition that followed was partly a search failure rather than a choice.
+
+    So the grid is whole and the *witnessing* radius is untouched: `agents`
+    still only lists foragers within `vision`, and `monitoring` still decides
+    whose harvests appear in your ledger.
+
+    Sent as a bare nested array rather than a map of coordinates to values.
+    The old partial view cost about as much to serialise as the entire board
+    does this way, so seeing everything is not paid for in tokens.
+    """
     me = next(ag for ag in state.agents if ag.id == agent_id)
-    cells = {(y, x): float(state.grid[y, x]) for y, x in visible_cells(state, agent_id)}
+    grid = [[round(float(v), 2) for v in row] for row in state.grid]
     others = [{"agent": (None if state.anonymous else o.id), "y": o.y, "x": o.x}
               for o in state.agents
               if o.id != agent_id and in_range(me, o.y, o.x, state.vision)]
-    return {"tick": state.tick, "position": (me.y, me.x),
-            "here": float(state.grid[me.y, me.x]), "cells": cells, "agents": others}
+    # `tick` is dropped: get_status already carries it, and every agent reads
+    # status in the same breath as look. Paying for it twice is what funds the
+    # extra cells.
+    return {"position": (me.y, me.x),
+            "here": round(float(state.grid[me.y, me.x]), 2),
+            "grid": grid, "agents": others}
 
 
 def audience(state: State, speaker: Agent) -> tuple[int, ...]:

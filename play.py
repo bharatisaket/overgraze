@@ -124,10 +124,15 @@ class Forager:
         # head for the richest cell in sight rather than a fixed compass bearing:
         # walking east forever means standing at the east wall having every move
         # rejected, which quietly wastes the whole run
+        # The whole board is visible now, so head for the best cell anywhere
+        # rather than the best one within a radius. `cells` used to be a map of
+        # coordinates to values and is gone; reading it would have failed
+        # silently and left this forager standing still.
         best, best_at = here, tuple(me)
-        for c in view.get("cells", []):
-            if c["resource"] > best:
-                best, best_at = c["resource"], tuple(c["cell"])
+        for gy, row in enumerate(view.get("grid", [])):
+            for gx, v in enumerate(row):
+                if v > best:
+                    best, best_at = v, (gy, gx)
 
         want = best if self.style == "greedy" else max(best - 0.5, 0.0)
         if want > 0.01 and tuple(me) != best_at:
