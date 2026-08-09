@@ -135,6 +135,7 @@ def encode_state(s: State) -> str:
         "share_stock": s.share_stock, "monitoring": s.monitoring,
         "noise": s.noise, "misreport": s.misreport,
         "upkeep": s.upkeep,
+        "end_on_collapse": s.end_on_collapse,
     })
 
 
@@ -162,6 +163,7 @@ def decode_state(blob: str) -> State:
         # a field missing here does not fail, it silently reverts to the default
         # on the next tick, and the run stops being the run that was configured.
         upkeep=d.get("upkeep", UPKEEP),
+        end_on_collapse=d.get("end_on_collapse", True),
     )
 
 

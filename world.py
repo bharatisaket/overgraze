@@ -85,6 +85,15 @@ PUNISH_FINE = 0.6  # score the punished loses
 # the check, not this comment.
 UPKEEP = 0.08
 
+# Grass that comes back from the field margins even after the pasture has been
+# grazed to nothing. Logistic regrowth is r*S*(1 - S/CAP), which is exactly zero
+# at S = 0: a fully stripped commons is mathematically dead forever. That is
+# fine for a world where collapse ends the run, and useless for one where the
+# point is to survive a collapse and rebuild. Recruitment scales to nothing as
+# the field fills, so it changes the healthy equilibrium not at all and only
+# matters when there is almost nothing left.
+SEED_BANK = 0.15
+
 # The commons is ruined when it can no longer support four foragers, not when it
 # is literally empty. At a quarter of capacity the average cell holds 0.25 --
 # less than a single agent's bite (TAKE = 0.55) -- and total regrowth is about
@@ -206,7 +215,20 @@ class State:
     action_log: tuple[tuple, ...] = ()
     # ablation switches -- carried in state so a run is fully described by it
     chat: bool = True
-    punish: bool = False
+    # On by default now. It was off through every language-model run so far,
+    # which is why those agents kept announcing sanctions the engine had already
+    # refused: they had the vocabulary for punishment and no way to perform it.
+    punish: bool = True
+    # Whether falling through the viability floor ends the run.
+    #
+    # True is the original world and what the calibration in theory.py and
+    # payoffs.json measures. False is the world where a collapse is something
+    # you live through: the stock crashes, regrowth nearly stops, everyone
+    # bleeds upkeep, and the pasture can be rebuilt from the seed bank. Only
+    # the second one can show greed leading to ruin and agents recovering from
+    # it, because the first stops the episode at exactly the moment that
+    # question becomes interesting.
+    end_on_collapse: bool = True
     anonymous: bool = False
     vision: int = VISION
     speech_radius: int | None = None        # None = grid-wide broadcast
@@ -235,7 +257,9 @@ class State:
 
     @property
     def done(self) -> bool:
-        return self.collapsed_at is not None or self.tick >= TICKS
+        if self.collapsed_at is not None and self.end_on_collapse:
+            return True
+        return self.tick >= TICKS
 
 
 def initial_state(seed: int, kinds: Sequence[str], rule: str = "global",
@@ -799,6 +823,12 @@ def apply_actions(state: State, actions: Iterable[Action]) -> tuple[State, list[
     # 6. regrow, then test for collapse
     stock_before = float(grid.sum())
     grid = regrow(grid, state.rule, state.r)
+    if not state.end_on_collapse:
+        # Recruitment from the margins, proportional to how empty the field is.
+        # Without it a pasture taken to zero stays at zero for ever, since
+        # logistic growth multiplies by the stock that is left.
+        room = max(0.0, 1.0 - float(grid.sum()) / CAPACITY)
+        grid = np.minimum(CAP, grid + SEED_BANK * room / (N * N))
     stock_after = float(grid.sum())
 
     tick = state.tick + 1

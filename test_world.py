@@ -554,8 +554,17 @@ class TestVision(unittest.TestCase):
 
 
 class TestPunish(unittest.TestCase):
-    def test_punish_is_off_by_default(self):
-        s = at(at(st(("greedy", "greedy")), 0, 2, 2), 1, 2, 3)
+    def test_punish_is_on_by_default(self):
+        """It was off, and that silently shaped every language-model run.
+
+        Agents had the vocabulary for punishment and no way to perform it, so
+        they announced sanctions the engine had already refused -- eleven
+        attempts across four runs, every one rejected, and thirty claims to
+        have punished somebody. Enforcement now exists by default and has to be
+        switched off deliberately.
+        """
+        self.assertTrue(st().punish)
+        s = st(("greedy", "greedy"), punish=False)
         _, ev = apply_actions(s, [Action(0, "punish", subject=1)])
         self.assertTrue(any(e["reason"] == "punish is disabled in this run"
                             for e in ev if e["type"] == "reject"))
@@ -842,6 +851,48 @@ class TestPacts(unittest.TestCase):
         self.assertEqual(pacts_view(s, 1)["yours"], [0])
         self.assertEqual(pacts_view(s, 2)["yours"], [])
         self.assertTrue(pacts_view(s, 2)["pacts"][0]["max_take"])
+
+
+class TestSurvivableCollapse(unittest.TestCase):
+    """A collapse you can live through, so ruin can be followed by recovery.
+
+    With end_on_collapse the episode stops at the viability floor, which is the
+    exact moment the interesting question starts: agents can be destroyed by
+    greed but can never be seen learning from it. Recruitment from the seed bank
+    is what makes rebuilding possible at all -- logistic growth multiplies by the
+    stock remaining, so a field taken to zero is dead for ever without it.
+    """
+
+    def test_the_classic_world_still_ends_at_the_floor(self):
+        s = st(("greedy",), upkeep=0.0)
+        bare = s.grid.copy(); bare[:] = 0.0
+        s = type(s)(**{**s.__dict__, "grid": bare})
+        s1, _ = apply_actions(s, [Action(0, "noop")])
+        self.assertIsNotNone(s1.collapsed_at)
+        self.assertTrue(s1.done)
+
+    def test_a_survivable_world_records_the_collapse_and_carries_on(self):
+        s = st(("greedy",), upkeep=0.0, end_on_collapse=False)
+        bare = s.grid.copy(); bare[:] = 0.0
+        s = type(s)(**{**s.__dict__, "grid": bare})
+        s1, _ = apply_actions(s, [Action(0, "noop")])
+        self.assertIsNotNone(s1.collapsed_at)
+        self.assertFalse(s1.done, "the run stopped at the floor")
+
+    def test_a_stripped_field_regrows_from_nothing(self):
+        s = st(("greedy",), upkeep=0.0, end_on_collapse=False)
+        bare = s.grid.copy(); bare[:] = 0.0
+        s = type(s)(**{**s.__dict__, "grid": bare})
+        for _ in range(12):
+            s, _ = apply_actions(s, [Action(0, "noop")])
+        self.assertGreater(float(s.grid.sum()), 0.5,
+                           "logistic growth alone leaves zero at zero for ever")
+
+    def test_recruitment_does_not_inflate_a_healthy_field(self):
+        s = st(("greedy",), upkeep=0.0, end_on_collapse=False)
+        for _ in range(6):
+            s, _ = apply_actions(s, [Action(0, "noop")])
+        self.assertLessEqual(float(s.grid.sum()), CAPACITY + 1e-6)
 
 if __name__ == "__main__":
     unittest.main()
