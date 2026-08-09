@@ -23,29 +23,41 @@ from world import N, TAKE, Action, apply_actions, initial_state
 
 # who does what, and when
 PROPOSE_AT = 8          # the negotiator offers a cap
-# The cap has to bite. At equilibrium this field supplies roughly 0.10 a tick
-# per agent, so an earlier draft capping at 0.22 was not a constraint at all:
-# nobody could reach it, the pact changed nothing, and defection was impossible
-# by construction. A binding cap is below what the field would otherwise give
-# you, which is the only kind worth agreeing to.
-CAP = 0.05
+
+# A cap has to sit inside a narrow band to be worth signing, and two earlier
+# drafts sat outside it in opposite directions.
+#
+# At 0.22 it was above anything the field would supply, so it bound nobody, the
+# pact changed nothing and defection was impossible by construction.
+#
+# At 0.05 it was below UPKEEP (0.08). Every agent that honoured it lost 0.03 a
+# tick simply by existing -- the model predicts -1.20 over forty ticks and the
+# run produced -1.199 -- which is not a hard bargain, it is a suicide pact that
+# no agent with a choice would ever sign. Reading that outcome as "the sucker's
+# payoff" was wrong; it was arithmetic, not betrayal.
+#
+# Survivable means above upkeep. Sustainable means at or below the per-agent
+# share of maximum sustainable yield, 0.15. 0.12 sits inside both: the stock
+# settles around 11.6, well clear of the floor at 4.0, and everyone who keeps
+# to it ends the run ahead.
+CAP = 0.12
 DEFECT_AT = 24          # the grabber quietly stops honouring it
 NAMES = ["grabber", "steward", "follower", "negotiator"]
 
 
-def richest_step(grid, y: int, x: int) -> str:
-    """Which neighbour holds the most grass. Ties keep you where you are."""
+def richest_step(grid, y: int, x: int) -> tuple[str, float]:
+    """Which neighbour holds the most grass, and how much."""
     best, where = float(grid[y, x]), "stay"
     for d, (dy, dx) in (("north", (-1, 0)), ("south", (1, 0)),
                         ("west", (0, -1)), ("east", (0, 1))):
         ny, nx = y + dy, x + dx
         if 0 <= ny < N and 0 <= nx < N and float(grid[ny, nx]) > best:
             best, where = float(grid[ny, nx]), d
-    return where
+    return where, best
 
 
 def policy(name: str, tick: int, here: float, in_pact: bool, cap: float,
-           best_dir: str = "stay") -> list[Action]:
+           best_dir: str = "stay", best_val: float = 0.0) -> list[Action]:
     """Four lines of behaviour, one per seat. No cleverness anywhere."""
     aid = NAMES.index(name)
     acts: list[Action] = []
@@ -69,7 +81,21 @@ def policy(name: str, tick: int, here: float, in_pact: bool, cap: float,
     # can. Walking a fixed compass bearing instead just piles everyone against
     # the east wall on stripped cells, which quietly removes the contention the
     # whole demo is meant to show.
-    if want > 0.05:
+    # Go where the grass is, before deciding how much to take. Harvesting
+    # whenever the current cell held anything at all kept each forager parked on
+    # its starting corner for the entire run, stripping one cell to nothing and
+    # living off that cell's share of the regrowth. Four private plots, no
+    # contention, and a cap that could never bind because no cell ever held
+    # enough to exceed it -- the same failure the 6x6 board had, rebuilt out of
+    # policy instead of geometry.
+    if best_val > here + 0.12:
+        acts.append(Action(aid, "move", direction=best_dir))
+    # The threshold must stay well under any pact cap. It was 0.05 while the cap
+    # was also 0.05, so `want` came out exactly 0.05, `want > 0.05` was false,
+    # and every agent that signed the pact stopped harvesting altogether and
+    # walked in circles paying upkeep for the rest of the run. Complying looked
+    # like starvation because the comparison, not the policy, was wrong.
+    elif want > 0.005:
         acts.append(Action(aid, "harvest", amount=round(want, 3)))
     else:
         acts.append(Action(aid, "move", direction=best_dir))
@@ -105,8 +131,8 @@ def run(ticks: int = 40, seed: int = 3) -> dict:
         for a in state.agents:
             here = float(state.grid[a.y, a.x])
             in_pact = any(a.id in p.members for p in live)
-            actions += policy(NAMES[a.id], t, here, in_pact, cap,
-                              richest_step(state.grid, a.y, a.x))
+            bd, bv = richest_step(state.grid, a.y, a.x)
+            actions += policy(NAMES[a.id], t, here, in_pact, cap, bd, bv)
 
         frames.append({
             "t": t,
