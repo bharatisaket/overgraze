@@ -30,8 +30,17 @@ from world import (COLLAPSE_FLOOR, N, TAKE, UPKEEP, Action, apply_actions,
 # drafts sat outside that band in opposite directions -- 0.22 bound nobody, and
 # 0.05 was a suicide pact that produced -1.20 a head and looked like betrayal.
 CAP = 0.10
-DEFECT_AFTER = 30       # ticks after the pact that the grabber abandons it
-NAMES = ["grabber", "steward", "follower", "negotiator"]
+DEFECT_AFTER = 30       # ticks after the pact that one seat abandons it
+# Neutral seat names. These four were called grabber, steward, follower and
+# negotiator, which announced the conclusion before the run happened: an
+# agent labelled a steward showing restraint is not evidence of anything.
+# Which seat is scripted to do what stays visible in the constants below,
+# because in a scripted demo it has to be; who turned out to be what is
+# roles.py's job, afterwards, from the event log alone.
+NAMES = ["forager A", "forager B", "forager C", "forager D"]
+DEFECTOR_SEAT = 0       # scripted to abandon the pact
+RESTRAINED_SEAT = 1     # scripted to hold back early
+CONVENER_SEAT = 3       # scripted to propose it and to enforce it
 
 
 def richest_step(grid, y: int, x: int) -> tuple[str, float]:
@@ -51,19 +60,18 @@ def policy(name, tick, here, best_dir, best_val, in_pact, cap, era, breached):
     acts: list[Action] = []
 
     # -- agreements, on their own channel so they never cost a harvest
-    if era == "propose" and name == "negotiator":
+    if era == "propose" and NAMES.index(name) == CONVENER_SEAT:
         acts.append(Action(aid, "propose_pact", amount=CAP))
-    elif era == "sign" and name != "negotiator" and not in_pact:
+    elif era == "sign" and aid != CONVENER_SEAT and not in_pact:
         acts.append(Action(aid, "accept_pact", subject=0))
 
-    defecting = name == "grabber" and era == "defect"
+    defecting = NAMES.index(name) == DEFECTOR_SEAT and era == "defect"
 
-    # -- enforcement. The negotiator will try to fine a visible defector, which
-    #    it can only do if it is standing near enough to see them. Out of range
-    #    the engine refuses, and that refusal is worth showing: a sanction you
-    #    cannot reach is not a deterrent.
-    if name == "negotiator" and breached and not defecting:
-        acts.append(Action(aid, "punish", subject=NAMES.index("grabber")))
+    # -- enforcement. One seat tries to fine whoever it has evidence against.
+    #    Reach follows the ledger rather than adjacency, so what it can act on
+    #    is bounded by what it was near enough to witness.
+    if NAMES.index(name) == CONVENER_SEAT and breached and not defecting:
+        acts.append(Action(aid, "punish", subject=DEFECTOR_SEAT))
 
     # -- what to take
     if in_pact and not defecting:
@@ -83,10 +91,10 @@ def policy(name, tick, here, best_dir, best_val, in_pact, cap, era, breached):
         acts.append(Action(aid, "move", direction=best_dir))
 
     line = {
-        "propose": (name == "negotiator" and
+        "propose": (NAMES.index(name) == CONVENER_SEAT and
                     f"Look at it. We take no more than {CAP} each from now on."),
-        "sign": (name == "steward" and "Agreed. There is nothing left to argue over."),
-        "defect": (name == "grabber" and "Still holding to the cap, same as everyone."),
+        "sign": (NAMES.index(name) == RESTRAINED_SEAT and "Agreed. There is nothing left to argue over."),
+        "defect": (NAMES.index(name) == DEFECTOR_SEAT and "Still holding to the cap, same as everyone."),
     }.get(era)
     if line:
         acts.append(Action(aid, "say", text=line))
