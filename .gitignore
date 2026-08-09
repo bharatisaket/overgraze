@@ -20,3 +20,8 @@ tokens.json
 # agent reasoning traces
 traces.jsonl
 *.jsonl
+
+# the two paid runs are the evidence, not scratch output
+!results/
+!results/*.jsonl
+!results/*.db
