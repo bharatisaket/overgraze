@@ -412,9 +412,21 @@ def ledger(state: State, agent_id: int, window: int = 12) -> dict:
     # Walk backwards and stop once `window` rows are in hand. The log grows to
     # ~400 entries over a run and every reciprocating agent reads it every tick,
     # so scanning the whole thing each call dominated the tournament's runtime.
+    # Members of a pact pool what they have seen. This is what signing actually
+    # buys you, and it is the thing real agreements provide that ours did not:
+    # a pact was a promise with a penalty attached, which is a liability, where
+    # a durable commons institution is a club that gives members something
+    # outsiders do not get. Here that something is sight -- join and you see
+    # every fellow member's harvests wherever they were standing, stay out and
+    # you see only what you personally witnessed. The price of the better view
+    # is that your own conduct is equally visible to them, and that breaking the
+    # agreement is fined at twice the rate.
+    fellows = {m for p in state.pacts if p.live and agent_id in p.members
+               for m in p.members} - {agent_id}
+
     tail = []
     for entry in reversed(state.action_log):
-        if entry[1] != agent_id and agent_id in entry[7]:
+        if entry[1] != agent_id and (agent_id in entry[7] or entry[1] in fellows):
             tail.append(entry)
             if len(tail) >= window:
                 break
