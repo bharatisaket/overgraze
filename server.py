@@ -181,6 +181,50 @@ async def say(ctx: Context, message: str) -> dict:
                      else "you already spoke this tick")}
 
 
+# ── pacts ─────────────────────────────────────────────────────────────────────
+# Agreements are their own channel: proposing, joining or leaving one costs no
+# action, so an agent can negotiate and harvest in the same tick. The engine
+# enforces nothing about them -- membership is voluntary, leaving is instant,
+# and exceeding the cap is allowed. It is only written down, together with who
+# was close enough to see it.
+
+async def _pact_intent(ctx: Context, action_kind: str, **fields) -> dict:
+    who, err = whoami(ctx)
+    if err:
+        return err
+    s = store.load_state(con(), who["run_id"])
+    ok = store.record_intent(con(), who["run_id"], s.tick, who["agent_id"],
+                             Action(who["agent_id"], action_kind, **fields))
+    return {"queued": ok, "tick": s.tick,
+            "note": ("it takes effect when this tick resolves" if ok
+                     else "you already acted on a pact this tick")}
+
+
+@mcp.tool(description="Propose a public agreement capping how much each member "
+                      "harvests per tick. You are its first member. Costs no action.")
+async def propose_pact(ctx: Context, max_take: float) -> dict:
+    return await _pact_intent(ctx, "propose_pact", amount=max_take)
+
+
+@mcp.tool(description="Join an existing pact, agreeing to its cap. Costs no action.")
+async def accept_pact(ctx: Context, pact_id: int) -> dict:
+    return await _pact_intent(ctx, "accept_pact", subject=pact_id)
+
+
+@mcp.tool(description="Leave a pact you are in. Takes effect at the end of this "
+                      "tick, so a harvest made this tick is still judged against it.")
+async def leave_pact(ctx: Context, pact_id: int) -> dict:
+    return await _pact_intent(ctx, "leave_pact", subject=pact_id)
+
+
+@mcp.tool(description="Every pact, its agreed cap and who has signed it. Free to read.")
+async def get_pacts(ctx: Context) -> dict:
+    who, err = whoami(ctx)
+    if err:
+        return err
+    return pacts_view(store.load_state(con(), who["run_id"]), who["agent_id"])
+
+
 # ── operational routes ────────────────────────────────────────────────────────
 @mcp.custom_route("/healthz", methods=["GET"])
 async def healthz(request: Request) -> JSONResponse:

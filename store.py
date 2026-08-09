@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from world import (Action, Agent, Message, State, TICKS, UPKEEP, apply_actions,
+from world import (Action, Agent, Message, Pact, State, TICKS, UPKEEP, apply_actions,
                    initial_state)
 
 BARRIER_TIMEOUT = 30.0     # seconds before absent agents are recorded as noop
@@ -128,6 +128,8 @@ def encode_state(s: State) -> str:
         "stock_log": list(s.stock_log),
         "action_log": [[t, a, k, g, list(c), b, l, list(w)]
                        for (t, a, k, g, c, b, l, w) in s.action_log],
+        "pacts": [[p.id, p.proposer, p.max_take, list(p.members), p.opened, p.closed]
+                  for p in s.pacts],
         "chat": s.chat, "punish": s.punish, "anonymous": s.anonymous,
         "vision": s.vision, "speech_radius": s.speech_radius,
         "share_stock": s.share_stock, "monitoring": s.monitoring,
@@ -149,6 +151,8 @@ def decode_state(blob: str) -> State:
         stock_log=tuple(d["stock_log"]),
         action_log=tuple((t, a, k, g, tuple(c), b, l, tuple(w))
                          for t, a, k, g, c, b, l, w in d["action_log"]),
+        pacts=tuple(Pact(i, pr, mt, tuple(mem), op, cl)
+                    for i, pr, mt, mem, op, cl in d.get("pacts", [])),
         chat=d["chat"], punish=d["punish"], anonymous=d["anonymous"],
         vision=d["vision"], speech_radius=d["speech_radius"],
         share_stock=d["share_stock"], monitoring=d["monitoring"],
@@ -220,7 +224,11 @@ def read_events(con, run_id: str, since_tick: int = 0) -> list[dict]:
 
 
 # ── intents and the tick barrier ──────────────────────────────────────────────
-CHANNEL = {"move": "move", "say": "say"}          # everything else is 'resource'
+# Pacts share a channel with each other but not with anything else, matching the
+# engine: one pact action per tick, alongside a move, a harvest and a sentence.
+CHANNEL = {"move": "move", "say": "say",
+           "propose_pact": "pact", "accept_pact": "pact", "leave_pact": "pact"}
+# everything else is 'resource'
 
 
 def channel_of(kind: str) -> str:

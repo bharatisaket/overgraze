@@ -12,7 +12,8 @@ import unittest
 
 import numpy as np
 
-from world import (CAP, CAPACITY, COLLAPSE_FLOOR, N, PLANT, PUNISH_COST,
+from world import (CAP, CAPACITY, COLLAPSE_FLOOR, N, PLANT, PUNISH_COST, Pact,
+                   pacts_view,
                    PUNISH_FINE, SAY_LIMIT, TAKE, TICKS, Action, apply_actions,
                    history, initial_state, ledger, listen, look, neighbours_mean,
                    regrow, resolve_cell, rng_for, status)
@@ -729,6 +730,118 @@ class TestUpkeep(unittest.TestCase):
         for _ in range(5):
             s, _ = apply_actions(s, [Action(0, "noop")])
         self.assertAlmostEqual(s.agents[0].score, -0.40)
+
+
+class TestPacts(unittest.TestCase):
+    """Agreements as objects rather than as things said in chat.
+
+    The agents were already negotiating caps in free text within three ticks.
+    Nothing bound them, nothing could be checked, and whether a promise had been
+    broken was a question you answered by reading the transcript. These tests
+    are about turning that into arithmetic.
+    """
+
+    def _pact(self, cap=0.3, joiners=(1,)):
+        s = st(("a", "b", "c"))
+        s, _ = apply_actions(s, [Action(0, "propose_pact", amount=cap)])
+        acts = [Action(j, "accept_pact", subject=0) for j in joiners]
+        s, ev = apply_actions(s, acts)
+        return s, ev
+
+    def test_a_proposal_creates_a_pact_with_its_proposer_in_it(self):
+        s = st(("a", "b"))
+        s1, ev = apply_actions(s, [Action(0, "propose_pact", amount=0.3)])
+        self.assertEqual(len(s1.pacts), 1)
+        self.assertEqual(s1.pacts[0].members, (0,))
+        self.assertAlmostEqual(s1.pacts[0].max_take, 0.3)
+        self.assertTrue(any(e["kind"] == "proposed"
+                            for e in ev if e["type"] == "pact"))
+
+    def test_accepting_adds_you_to_the_membership(self):
+        s, _ = self._pact()
+        self.assertEqual(s.pacts[0].members, (0, 1))
+
+    def test_negotiating_does_not_use_up_your_action(self):
+        """A proposal that cost a harvest would price coordination out."""
+        s = st(("a", "b"))
+        s1, ev = apply_actions(s, [Action(0, "propose_pact", amount=0.3),
+                                   Action(0, "harvest", amount=0.4),
+                                   Action(0, "say", text="lets cap at 0.3")])
+        self.assertFalse([e for e in ev if e["type"] == "reject"])
+        self.assertAlmostEqual(s1.agents[0].score, 0.4)
+        self.assertEqual(len(s1.pacts), 1)
+        self.assertEqual(len(s1.messages), 1)
+
+    def test_taking_more_than_you_promised_is_recorded(self):
+        s, _ = self._pact(cap=0.2, joiners=(1,))
+        _, ev = apply_actions(s, [Action(1, "harvest", amount=0.5)])
+        broken = [e for e in ev if e["type"] == "pact" and e["kind"] == "broken"]
+        self.assertEqual(len(broken), 1)
+        self.assertEqual(broken[0]["agent"], 1)
+        self.assertAlmostEqual(broken[0]["max_take"], 0.2)
+
+    def test_keeping_to_the_cap_is_not_recorded_as_a_breach(self):
+        s, _ = self._pact(cap=0.5, joiners=(1,))
+        _, ev = apply_actions(s, [Action(1, "harvest", amount=0.4)])
+        self.assertFalse([e for e in ev if e["type"] == "pact"
+                          and e["kind"] == "broken"])
+
+    def test_a_non_member_cannot_break_a_pact_they_never_joined(self):
+        s, _ = self._pact(cap=0.1, joiners=(1,))
+        _, ev = apply_actions(s, [Action(2, "harvest", amount=0.5)])
+        self.assertFalse([e for e in ev if e["type"] == "pact"
+                          and e["kind"] == "broken"])
+
+    def test_leaving_and_over_taking_in_one_tick_still_counts_as_a_breach(self):
+        """The loophole that would make the whole record meaningless."""
+        s, _ = self._pact(cap=0.2, joiners=(1,))
+        _, ev = apply_actions(s, [Action(1, "leave_pact", subject=0),
+                                  Action(1, "harvest", amount=0.5)])
+        broken = [e for e in ev if e["type"] == "pact" and e["kind"] == "broken"]
+        self.assertEqual(len(broken), 1, "left the pact and escaped the record")
+
+    def test_leaving_first_then_over_taking_next_tick_is_clean(self):
+        s, _ = self._pact(cap=0.2, joiners=(1,))
+        s1, _ = apply_actions(s, [Action(1, "leave_pact", subject=0)])
+        _, ev = apply_actions(s1, [Action(1, "harvest", amount=0.5)])
+        self.assertFalse([e for e in ev if e["type"] == "pact"
+                          and e["kind"] == "broken"])
+
+    def test_the_last_member_leaving_closes_it(self):
+        s = st(("a", "b"))
+        s, _ = apply_actions(s, [Action(0, "propose_pact", amount=0.3)])
+        s, _ = apply_actions(s, [Action(0, "leave_pact", subject=0)])
+        self.assertFalse(s.pacts[0].live)
+
+    def test_one_pact_action_per_tick(self):
+        s = st(("a", "b"))
+        _, ev = apply_actions(s, [Action(0, "propose_pact", amount=0.3),
+                                  Action(0, "propose_pact", amount=0.4)])
+        self.assertTrue(any(e["reason"] == "you already acted on a pact this tick"
+                            for e in ev if e["type"] == "reject"))
+
+    def test_a_cap_above_the_take_limit_is_refused(self):
+        s = st(("a", "b"))
+        _, ev = apply_actions(s, [Action(0, "propose_pact", amount=TAKE + 0.1)])
+        self.assertTrue([e for e in ev if e["type"] == "reject"])
+
+    def test_you_cannot_join_a_pact_twice(self):
+        s, _ = self._pact()
+        _, ev = apply_actions(s, [Action(1, "accept_pact", subject=0)])
+        self.assertTrue(any(e["reason"] == "you are already in that pact"
+                            for e in ev if e["type"] == "reject"))
+
+    def test_pacts_are_disabled_with_chat(self):
+        s = st(("a", "b"), chat=False)
+        _, ev = apply_actions(s, [Action(0, "propose_pact", amount=0.3)])
+        self.assertTrue(any(e["reason"] == "chat is disabled in this run"
+                            for e in ev if e["type"] == "reject"))
+
+    def test_the_view_tells_you_which_pacts_are_yours(self):
+        s, _ = self._pact(joiners=(1,))
+        self.assertEqual(pacts_view(s, 1)["yours"], [0])
+        self.assertEqual(pacts_view(s, 2)["yours"], [])
+        self.assertTrue(pacts_view(s, 2)["pacts"][0]["max_take"])
 
 if __name__ == "__main__":
     unittest.main()

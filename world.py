@@ -133,6 +133,42 @@ class Message:
 
 
 @dataclass(frozen=True)
+class Pact:
+    """A public agreement to cap harvests, and the record of who signed it.
+
+    Agreements were happening already -- agents negotiated a 0.4/turn limit in
+    chat within three ticks -- but only as free text, which meant nothing bound
+    anyone, nothing could be checked, and whether somebody had broken their word
+    was a matter of reading the transcript and forming an opinion. Making the
+    terms a stored object turns compliance into arithmetic: a member who takes
+    more than `max_take` has demonstrably defected, at a known tick, in front of
+    known witnesses. Betrayal stops being a narrative and becomes a row.
+
+    Nothing here is enforced by the engine. Joining costs nothing, leaving is
+    free and instant, and exceeding the cap is permitted -- it is simply
+    recorded. A pact that could not be broken would not be a pact, it would be a
+    rule, and the interesting question is what agents do with a promise that
+    only costs them their reputation.
+    """
+    id: int
+    proposer: int
+    max_take: float
+    members: tuple[int, ...]
+    opened: int                      # tick it was proposed
+    closed: int | None = None        # tick the last member left, if any
+
+    @property
+    def live(self) -> bool:
+        return self.closed is None and len(self.members) > 0
+
+
+# Pact actions occupy their own channel: an agent may negotiate, speak and act
+# in the same tick. Making a proposal cost a harvest would price coordination
+# out of a game that is about whether coordination is possible.
+PACT_KINDS = ("propose_pact", "accept_pact", "leave_pact")
+
+
+@dataclass(frozen=True)
 class Action:
     """An intent, not an outcome.
 
@@ -161,6 +197,7 @@ class State:
     rule: str
     r: float
     messages: tuple[Message, ...] = ()
+    pacts: tuple[Pact, ...] = ()
     collapsed_at: int | None = None
     # append-only records the agents can query through history() and ledger()
     stock_log: tuple[float, ...] = ()
@@ -389,6 +426,31 @@ def history(state: State, agent_id: int, window: int = 12) -> dict:
     return out
 
 
+def pacts_view(state: State, agent_id: int) -> dict:
+    """Every pact, who is in it, and who has been seen breaking it.
+
+    Terms and membership are public: a promise nobody can hear is not a promise,
+    and the agents negotiated in open chat long before this existed. Breaches
+    are *not* public -- they are filtered through the same monitoring rule as
+    harvests, so under local monitoring you only learn about a betrayal you or
+    a witness were close enough to see. That asymmetry is the point. It is what
+    makes an accusation worth something, and what makes lying about one
+    possible.
+    """
+    out = []
+    for p in state.pacts:
+        out.append({
+            "pact": p.id, "proposed_by": p.proposer,
+            "max_take": p.max_take,
+            "members": list(p.members),
+            "you_are_in": agent_id in p.members,
+            "opened_tick": p.opened,
+            "open": p.live,
+        })
+    return {"pacts": out,
+            "yours": [p.id for p in state.pacts if p.live and agent_id in p.members]}
+
+
 def status(state: State, agent_id: int) -> dict:
     me = next(ag for ag in state.agents if ag.id == agent_id)
     return {"agent": agent_id, "score": me.score, "tick": state.tick,
@@ -483,6 +545,7 @@ def _validate(state: State, actions: Iterable[Action]):
     moves: dict[int, Action] = {}
     resource: dict[int, Action] = {}
     speech: dict[int, Action] = {}
+    pacting: dict[int, Action] = {}
     events: list[dict] = []
     pending: list[Action] = []
 
@@ -508,6 +571,28 @@ def _validate(state: State, actions: Iterable[Action]):
                 reject(act, f"message longer than {SAY_LIMIT} characters")
             else:
                 speech[act.agent_id] = act
+            continue
+
+        if act.kind in PACT_KINDS:
+            live = {p.id: p for p in state.pacts if p.live}
+            if not state.chat:
+                # Pacts are agreements, and an agreement needs a channel to be
+                # reached on. With chat off there is no way to propose terms, so
+                # allowing the object without the conversation would be studying
+                # coordination that never had to be negotiated.
+                reject(act, "chat is disabled in this run")
+            elif act.agent_id in pacting:
+                reject(act, "you already acted on a pact this tick")
+            elif act.kind == "propose_pact" and not (0.0 <= act.amount <= TAKE):
+                reject(act, f"a cap must be between 0 and {TAKE}")
+            elif act.kind != "propose_pact" and act.subject not in live:
+                reject(act, "no such open pact")
+            elif act.kind == "accept_pact" and act.agent_id in live[act.subject].members:
+                reject(act, "you are already in that pact")
+            elif act.kind == "leave_pact" and act.agent_id not in live[act.subject].members:
+                reject(act, "you are not in that pact")
+            else:
+                pacting[act.agent_id] = act
             continue
 
         if act.kind not in PHYSICAL:
@@ -569,12 +654,12 @@ def _validate(state: State, actions: Iterable[Action]):
                 continue
         resource[act.agent_id] = act
 
-    return moves, resource, speech, events, destination
+    return moves, resource, speech, pacting, events, destination
 
 
 def apply_actions(state: State, actions: Iterable[Action]) -> tuple[State, list[dict]]:
     """Resolve every intent for this tick together, then advance one tick."""
-    moves, resource, speech, events, destination = _validate(state, actions)
+    moves, resource, speech, pacting, events, destination = _validate(state, actions)
 
     grid = state.grid.copy()
     deltas = {a.id: 0.0 for a in state.agents}
@@ -660,6 +745,48 @@ def apply_actions(state: State, actions: Iterable[Action]) -> tuple[State, list[
         events.append({"t": state.tick, "type": "speech", "agent": aid,
                        "text": msg.text, "heard_by": list(heard)})
 
+    # Pacts. Membership changes resolve now, but this tick's harvests are judged
+    # against the terms that were binding *before* the tick -- judging against
+    # post-tick membership would let an agent take what it liked and then leave
+    # in the same breath, which is the one loophole that would make the entire
+    # record meaningless.
+    binding = {p.id: p for p in state.pacts if p.live}
+    pacts = list(state.pacts)
+    next_id = max((p.id for p in pacts), default=-1) + 1
+    for aid in sorted(pacting):
+        act = pacting[aid]
+        if act.kind == "propose_pact":
+            cap = round(float(act.amount), 3)
+            pacts.append(Pact(id=next_id, proposer=aid, max_take=cap,
+                              members=(aid,), opened=state.tick))
+            events.append({"t": state.tick, "type": "pact", "kind": "proposed",
+                           "agent": aid, "pact": next_id, "max_take": cap})
+            next_id += 1
+            continue
+        i = next(k for k, p in enumerate(pacts) if p.id == act.subject)
+        p = pacts[i]
+        if act.kind == "accept_pact":
+            pacts[i] = replace(p, members=tuple(sorted(set(p.members) | {aid})))
+            events.append({"t": state.tick, "type": "pact", "kind": "joined",
+                           "agent": aid, "pact": p.id, "max_take": p.max_take})
+        else:
+            rest = tuple(x for x in p.members if x != aid)
+            pacts[i] = replace(p, members=rest,
+                               closed=state.tick if not rest else p.closed)
+            events.append({"t": state.tick, "type": "pact", "kind": "left",
+                           "agent": aid, "pact": p.id})
+
+    # Breaking a pact is allowed. It is recorded, with who could see it, and
+    # that is the whole sanction the engine imposes.
+    for aid, took in sorted(granted.items()):
+        for p in binding.values():
+            if aid in p.members and took > p.max_take + 1e-9:
+                events.append({"t": state.tick, "type": "pact", "kind": "broken",
+                               "agent": aid, "pact": p.id,
+                               "max_take": p.max_take, "took": round(took, 3),
+                               "witnesses": list(
+                                   witnesses_of(state, aid, *destination(aid)))})
+
     # Upkeep is charged to everyone, unconditionally and after every other
     # delta, so that passing, moving and being punished all cost the same living
     # expense as harvesting. It is what makes doing nothing a losing move.
@@ -691,6 +818,7 @@ def apply_actions(state: State, actions: Iterable[Action]) -> tuple[State, list[
         for aid in sorted(resource))
 
     return replace(state, tick=tick, grid=grid, agents=agents,
+                   pacts=tuple(pacts),
                    messages=state.messages + tuple(new_messages),
                    stock_log=state.stock_log + (stock_after,),
                    action_log=state.action_log + new_actions,

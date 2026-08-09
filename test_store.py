@@ -219,3 +219,47 @@ class TestUpkeepSurvivesStorage(unittest.TestCase):
     def test_zero_upkeep_is_not_mistaken_for_absent(self):
         info = store.create_run(self.con, ["a", "b"], r=0.15, upkeep=0.0)
         self.assertEqual(store.load_state(self.con, info["run_id"]).upkeep, 0.0)
+
+
+class TestPactChannel(unittest.TestCase):
+    """Pacts must be their own channel through SQLite, not just in the engine.
+
+    The intents table has a UNIQUE on (run, tick, agent, channel), so if a pact
+    action were filed as 'resource' it would collide with that agent's harvest
+    and one of the two would be silently dropped -- the agent would appear to
+    have negotiated instead of eaten, or the reverse, with no error anywhere.
+    """
+
+    def setUp(self):
+        self.con = store.connect(":memory:")
+        self.info = store.create_run(self.con, ["a", "b"], r=0.15, upkeep=0.0)
+        self.rid = self.info["run_id"]
+
+    def tearDown(self):
+        self.con.close()
+
+    def test_a_pact_and_a_harvest_can_be_banked_in_one_tick(self):
+        from world import Action
+        self.assertTrue(store.record_intent(
+            self.con, self.rid, 0, 0, Action(0, "propose_pact", amount=0.3)))
+        self.assertTrue(store.record_intent(
+            self.con, self.rid, 0, 0, Action(0, "harvest", amount=0.4)))
+        self.assertTrue(store.record_intent(
+            self.con, self.rid, 0, 0, Action(0, "say", text="cap at 0.3")))
+
+    def test_a_second_pact_action_in_one_tick_is_refused(self):
+        from world import Action
+        self.assertTrue(store.record_intent(
+            self.con, self.rid, 0, 0, Action(0, "propose_pact", amount=0.3)))
+        self.assertFalse(store.record_intent(
+            self.con, self.rid, 0, 0, Action(0, "leave_pact", subject=0)))
+
+    def test_pacts_survive_a_reload_mid_run(self):
+        from world import Action, apply_actions
+        s = store.load_state(self.con, self.rid)
+        s, _ = apply_actions(s, [Action(0, "propose_pact", amount=0.25)])
+        store.save_state(self.con, self.rid, s)
+        again = store.load_state(self.con, self.rid)
+        self.assertEqual(len(again.pacts), 1)
+        self.assertAlmostEqual(again.pacts[0].max_take, 0.25)
+        self.assertEqual(again.pacts[0].members, (0,))
