@@ -124,15 +124,20 @@ class Forager:
         # head for the richest cell in sight rather than a fixed compass bearing:
         # walking east forever means standing at the east wall having every move
         # rejected, which quietly wastes the whole run
-        # The whole board is visible now, so head for the best cell anywhere
-        # rather than the best one within a radius. `cells` used to be a map of
-        # coordinates to values and is gone; reading it would have failed
-        # silently and left this forager standing still.
+        # The whole board is visible now, so a cell is worth walking to only if
+        # it beats what is underfoot by more than the trip costs. Taking the
+        # global maximum outright made this forager worse off than when it was
+        # half blind: it spent the run walking toward distant maxima, one step a
+        # tick, arriving after somebody else had eaten them, and paid upkeep the
+        # whole way. Scores fell to a fifth while the pasture grew back around
+        # them. Discounting by distance is the difference between seeing more
+        # and knowing more.
         best, best_at = here, tuple(me)
         for gy, row in enumerate(view.get("grid", [])):
             for gx, v in enumerate(row):
-                if v > best:
-                    best, best_at = v, (gy, gx)
+                steps = abs(gy - me[0]) + abs(gx - me[1])
+                if v / (1.0 + steps) > best:
+                    best, best_at = v / (1.0 + steps), (gy, gx)
 
         want = best if self.style == "greedy" else max(best - 0.5, 0.0)
         if want > 0.01 and tuple(me) != best_at:

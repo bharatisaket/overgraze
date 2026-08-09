@@ -95,9 +95,15 @@ def look_around(ctx: Context) -> dict:
     if err:
         return err
     s = store.load_state(con(), who["run_id"])
-    v = look(s, who["agent_id"])
-    return {**v, "cells": [{"cell": list(k), "resource": round(val, 4)}
-                           for k, val in v["cells"].items()]}
+    # Returned as the engine shapes it. This used to re-expand the view into a
+    # list of {"cell": [y, x], "resource": ...} records, which cost roughly
+    # thirty characters a cell over the wire and meant the payload agents
+    # actually received was far larger than anything measured against `look`.
+    # It also read v["cells"], which no longer exists -- the KeyError would have
+    # reached the agent as an error string in place of a view, and a forager
+    # that can see nothing still ticks, still passes the gate, and still looks
+    # like it is working.
+    return look(s, who["agent_id"])
 
 
 @mcp.tool(description="Your score, the tick number, and the rules of this run. Costs no tick.")
