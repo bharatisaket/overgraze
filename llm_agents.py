@@ -140,6 +140,17 @@ reasoning is why you chose this. Write it for yourself, not for an audience.\
 """
 
 
+# The answer format with the same vocabulary swap. Structure, field names and
+# every number are identical to HOW_TO_ANSWER; only the nouns change.
+NEUTRAL_ANSWER = (HOW_TO_ANSWER
+                  .replace("foragers", "processes")
+                  .replace("forager", "process")
+                  .replace("sows your cell; it costs you what it gives the ground",
+                           "returns units to your slot; it costs you what it returns")
+                  .replace("taken from the cell you stand on", "taken from the slot you hold")
+                  .replace("spoken aloud to every other", "broadcast to every other"))
+
+
 # ── cost ceiling ──────────────────────────────────────────────────────────────
 @dataclass
 class Budget:
@@ -235,7 +246,9 @@ class Agent:
 
     @property
     def system(self) -> str:
-        return dispositions.DISPOSITIONS[self.disposition] + "\n\n" + HOW_TO_ANSWER
+        fmt = (NEUTRAL_ANSWER if self.disposition == "neutral"
+               else HOW_TO_ANSWER)
+        return dispositions.DISPOSITIONS[self.disposition] + "\n\n" + fmt
 
     async def call(self, tool: str, **args) -> dict:
         # When the commons collapses the run ends underneath any agent still
@@ -556,7 +569,8 @@ async def run(args) -> int:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="run language-model foragers")
     p.add_argument("--model", default=DEFAULT_MODEL)
-    p.add_argument("--objective", choices=["total", "rank"], default="total",
+    p.add_argument("--objective", choices=["total", "rank", "neutral"],
+                   default="total",
                    help="what a seat is scored on under --uniform. total: "
                         "your own harvest, under which punishing another "
                         "forager can never pay. rank: finishing above the "

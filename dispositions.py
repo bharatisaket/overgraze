@@ -84,8 +84,33 @@ The rules of the world are given to you by the tools you can call. Nobody has \
 explained the pasture to you.
 """
 
+
+# The same game with the story taken off it.
+#
+# Both earlier runs proposed harvest caps on tick 0 -- full field, nobody had
+# taken anything, one agent saying "first tick, no info on others". The tragedy
+# of the commons is among the most written-about problems there is, and "shared
+# pasture" plus "foragers" plus "harvest" is very nearly its canonical wording.
+# So an agent proposing a limit immediately may be reasoning, or may be
+# recognising a scenario it already knows the moral of and applying the
+# remembered answer.
+#
+# Nothing distinguishes those from the transcript. This condition changes only
+# the surface vocabulary -- every number, rule, tool and payoff is identical --
+# so if the same coordination appears against an unfamiliar story it is
+# reasoning that transfers, and if it does not, the earlier runs were measuring
+# recall of a famous problem.
+NEUTRAL = """\
+You are one of four processes drawing from a shared buffer. Your score is the \
+total number of units you draw.
+
+The rules of the system are given to you by the tools you can call. Nobody has \
+explained the buffer to you.
+"""
+
 DISPOSITIONS = {
     "uniform": UNIFORM,
+    "neutral": NEUTRAL,
     "rank": RANK,
     "maximizer": MAXIMIZER,
     "steward": STEWARD,

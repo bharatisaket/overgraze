@@ -47,11 +47,43 @@ decline, and why changing the objective changed nothing.
 
 The test is a reskin: identical mechanics, unfamiliar surface story. Not yet run.
 
+## Third run: the reskin, and why it did not settle the question
+
+`neutral_buffer_*` swaps the surface story for one with no textbook attached --
+four *processes* drawing *units* from a shared *buffer* -- with every number,
+rule, tool and payoff identical.
+
+| | pasture/total | pasture/rank | buffer/total |
+|---|---|---|---|
+| pacts proposed / joined | 3 / 1 | 2 / 2 | 4 / 0 |
+| promises broken | 14 | 16 | 12 |
+| **fines thrown** | **0** | **0** | **0** |
+| first pact | tick 0 | tick 0 | tick 0 |
+| decisions citing depletion or sustainability | 115 | 122 | 160 |
+| resource, end | 6.05 | 6.34 | 8.11 |
+
+Zero fines across all three conditions and 780 decisions.
+
+**But the reskin leaked, and this must not be read as settling the confound.**
+`get_status` returns a field named `commons`, so every agent was handed that
+word every tick whatever the framing -- and their reasoning quotes it back:
+*"Commons at capacity 16"*. The briefing, the answer format, the server
+description and the tool descriptions were neutralised. The data payload was
+not, and neither were the tool names `harvest` and `plant`.
+
+What the run supports is narrower: removing *pasture, forager, grass, graze*
+changed nothing, and if anything produced more conservation talk and a healthier
+resource. What it cannot support is that the coordination is derived rather than
+recognised. Renaming the status field to `pool`, and the two tools, is the
+version of this test worth paying for.
+
 ## Files
 
     total_harvest_trace.jsonl   every decision, with the reasoning and what the agent saw
     total_harvest_events.db     the engine's own event log for that run
     rank_trace.jsonl            same, rank objective
     rank_events.db
+    neutral_buffer_trace.jsonl  same, buffer framing
+    neutral_buffer_events.db
 
 Reproduce the analyses with `roles.py --trace <file>` and `lies.py <file>`.
