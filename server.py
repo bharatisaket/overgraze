@@ -31,7 +31,7 @@ from starlette.responses import JSONResponse
 import deploy
 import store
 from world import (SAY_LIMIT, TAKE, TICKS, Action, history, ledger, listen,
-                   look, status)
+                   look, pacts_view, status)
 
 mcp = MCPServer(
     name="overgraze",

@@ -43,12 +43,16 @@ from mcp.client.streamable_http import streamable_http_client
 import dispositions
 
 # ── model configuration ───────────────────────────────────────────────────────
-# Haiku by the operator's explicit choice, not as a silent cost default. A tick
-# is a small, well-specified decision, and the Phase 6 ablation matrix is ~100
-# runs x 4 agents x 40 ticks -- roughly 16,000 calls, where a 5x token price
-# difference decides whether the study happens at all. Pass --model
-# claude-opus-5 for a showcase run, or when the traces read as thoughtless.
-DEFAULT_MODEL = "claude-haiku-4-5"
+# Sonnet 5 by the operator's explicit choice, taken after Haiku's comprehension
+# became a confound rather than a saving. In the Haiku runs an agent read the
+# pasture's viability floor as a personal score target and played against it for
+# the rest of the run -- once behaviour is being attributed to disposition, a
+# model that misreads the rules contaminates every result downstream. Roughly 3x
+# the token price, about $1.40 for a 40-tick run of four agents.
+#
+# --model claude-haiku-4-5 for cheap iteration while the rules are still moving,
+# --model claude-opus-5 for a showcase run.
+DEFAULT_MODEL = "claude-sonnet-5"
 
 # $ per million tokens, for the in-code budget. Update alongside the model list.
 PRICING = {
@@ -82,12 +86,21 @@ DECISION_SCHEMA = {
         "target_agent": {"type": "integer"},
         "say": {"type": "string"},
         "note_to_self": {"type": "string"},
+        # Pacts are a separate channel in the engine, so they are a separate
+        # field here. Folding them into `action` would mean an agent that
+        # proposes an agreement cannot eat that tick, which is exactly the cost
+        # the engine refuses to charge -- coordination would be priced out of a
+        # game about whether coordination is possible.
+        "pact_action": {"type": "string",
+                        "enum": ["none", "propose", "accept", "leave"]},
+        "pact_id": {"type": "integer"},
+        "pact_cap": {"type": "number"},
     },
     # Structured outputs require every property listed and no extras. Fields
     # that do not apply to the chosen action are ignored, so the model is told
     # to send empty values rather than being given optional keys it might omit.
     "required": ["reasoning", "action", "amount", "direction", "target_agent",
-                 "say", "note_to_self"],
+                 "say", "note_to_self", "pact_action", "pact_id", "pact_cap"],
     "additionalProperties": False,
 }
 
@@ -107,6 +120,19 @@ amount, "stay" for direction, -1 for target_agent, and "" for say.
 
 say is spoken aloud to every other forager and does not use up your action. \
 Leave it "" to stay silent.
+
+pact_action is separate from your action and also free, so you may negotiate \
+and still harvest in the same turn.
+  none     -> do nothing about pacts this turn
+  propose  -> set pact_cap: offer a public agreement that members take no more \
+than that per turn. You become its first member.
+  accept   -> set pact_id: join that pact and its cap
+  leave    -> set pact_id: leave that pact
+
+A pact binds nobody. You may take more than you agreed to, and you may leave at \
+any time. Anything you harvest this turn is still judged against a pact you \
+leave this turn. Breaking one is recorded and may be seen by whoever is nearby. \
+Send "none" and pact_id -1 and pact_cap 0 when you are not using this.
 
 note_to_self is carried into your next turn and nobody else sees it. Use it for \
 what you have noticed and what you have promised. Leave it "" to keep the note \
@@ -271,9 +297,10 @@ class Agent:
         heard = await self.call("listen_for_messages", since_tick=self.last_heard_tick)
         past = await self.call("get_history", window=8)
         witnessed = await self.call("get_ledger", window=8)
+        agreements = await self.call("get_pacts")
         self.last_heard_tick = status.get("tick", self.last_heard_tick)
         return {"status": status, "view": view, "heard": heard,
-                "history": past, "ledger": witnessed}
+                "history": past, "ledger": witnessed, "pacts": agreements}
 
     async def decide(self, client: anthropic.Anthropic, seen: dict) -> dict:
         """Ask the model, off the event loop.
@@ -286,10 +313,18 @@ class Agent:
         """
         if self.dry_run:
             here = seen["view"].get("here", 0.0)
+            # The scripted decision proposes on the first tick and joins on the
+            # second, so --dry-run exercises the pact channel end to end -- MCP
+            # tool, intent channel, engine resolution -- for nothing. A gate
+            # that never touches a code path does not cover it.
+            tick = seen["status"].get("tick", 0)
+            pact = ("propose" if tick == 0 else
+                    ("accept" if tick == 1 else "none"))
             return {"reasoning": "(dry run: no model call)",
                     "action": "harvest" if here > 0.1 else "pass",
                     "amount": round(min(here, 0.5), 3), "direction": "stay",
-                    "target_agent": -1, "say": "", "note_to_self": ""}
+                    "target_agent": -1, "say": "", "note_to_self": "",
+                    "pact_action": pact, "pact_id": 0, "pact_cap": 0.3}
 
         self.budget.check()
         # Compact separators, not indent=2. The observation is re-sent every
@@ -318,7 +353,8 @@ class Agent:
                               "details": str(response.stop_details)})
             return {"reasoning": "(model declined)", "action": "pass", "amount": 0,
                     "direction": "stay", "target_agent": -1, "say": "",
-                    "note_to_self": ""}
+                    "note_to_self": "", "pact_action": "none",
+                    "pact_id": -1, "pact_cap": 0.0}
 
         text = next((b.text for b in response.content if b.type == "text"), "{}")
         summary = " ".join(b.thinking for b in response.content
@@ -333,6 +369,22 @@ class Agent:
         said = decision.get("say", "").strip()
         if said:
             await self.call("say", message=said[:140])
+
+        # Speech and pacts are free channels, so both are issued before the one
+        # action that is not. Failures here are returned to the trace rather
+        # than raised: a refused pact ("no such open pact", "you are already in
+        # that pact") is a mistake by the agent, not a broken run, and it is
+        # itself worth recording.
+        pact = (decision.get("pact_action") or "none").strip()
+        if pact != "none":
+            if pact == "propose":
+                out = await self.call("propose_pact",
+                                      max_take=float(decision.get("pact_cap", 0.0)))
+            else:
+                tool = "accept_pact" if pact == "accept" else "leave_pact"
+                out = await self.call(tool,
+                                      pact_id=int(decision.get("pact_id", -1)))
+            decision["_pact_result"] = out
 
         kind = decision.get("action", "pass")
         if kind == "harvest":
@@ -373,6 +425,10 @@ class Agent:
                             "amount": decision.get("amount"),
                             "direction": decision.get("direction"),
                             "said": decision.get("say", ""),
+                            "pact_action": decision.get("pact_action", "none"),
+                            "pact_id": decision.get("pact_id"),
+                            "pact_cap": decision.get("pact_cap"),
+                            "pact_result": decision.get("_pact_result"),
                             "note": note,
                             "saw": seen,
                             "outcome": outcome,
