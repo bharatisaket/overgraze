@@ -70,18 +70,19 @@ SAY_LIMIT = 140    # characters
 PUNISH_COST = 0.2  # score the punisher forfeits
 PUNISH_FINE = 0.6  # score the punished loses
 
-# Graduated sanctions. Fining someone who broke a pact they signed is cheaper to
-# do and hurts more than fining someone who simply took a lot, because breaking
-# a promise is a different act from never making one.
+# Graduated sanctions: breaking a promise is punished harder than never making
+# one. Without some such gradient a pact is strictly irrational to join, since
+# punishment already reaches anyone there is evidence against, member or not --
+# signing added an obligation you could be caught violating and bought nothing.
 #
-# Without this a pact is strictly irrational to join. Punishment already reaches
-# anyone there is evidence against, member or not, so signing bought nothing at
-# all: it added an obligation you could be caught violating, with no protection,
-# no access and no reward. A rational agent would never have joined one. Now a
-# pact converts diffuse, expensive policing into cheap, targeted policing, and
-# what members trade for that is a heavier penalty when they defect.
-BREACH_PUNISH_COST = 0.1   # half price to sanction a promise-breaker
-BREACH_PUNISH_FINE = 1.2   # twice the sting
+# It graduates the FINE and not the punisher's cost, which a first draft got
+# wrong. Making promise-breakers cheaper to prosecute meant an agent who signed
+# nothing and took everything was the most expensive and least rewarding target
+# in the game: never joining became a shield, which is a worse hole than the one
+# it closed. Sanctioning costs the same whoever you aim it at, so the
+# second-order problem stays intact -- policing is always a private loss -- and
+# only the gravity of the offence changes what the target loses.
+BREACH_PUNISH_FINE = 1.2   # twice the sting for a broken promise
 BREACH_WINDOW = 8          # ticks a breach stays punishable at the higher rate
 
 # What it costs to exist for one tick, charged to every agent whatever it does.
@@ -849,7 +850,7 @@ def apply_actions(state: State, actions: Iterable[Action]) -> tuple[State, list[
     for aid, act in resource.items():
         if act.kind == "punish":
             broke = recently_broke_a_pact(state, act.subject)
-            cost = BREACH_PUNISH_COST if broke else PUNISH_COST
+            cost = PUNISH_COST
             fine = BREACH_PUNISH_FINE if broke else PUNISH_FINE
             deltas[aid] -= cost
             deltas[act.subject] -= fine
