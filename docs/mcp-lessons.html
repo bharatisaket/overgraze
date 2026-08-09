@@ -1,0 +1,659 @@
+<title>MCP for product people — what building one actually taught me</title>
+
+<style>
+  :root{
+    --paper:#F4F3EF; --panel:#FBFAF7; --ink:#1A1A17; --ink-2:#4C4A44;
+    --muted:#7E7C74; --rule:#DCD9D0; --hair:#E8E5DD;
+    --accent:#1F5C4A; --warn:#9C3B24; --gold:#8A6A1F;
+    --serif:Georgia,"Iowan Old Style","Palatino Linotype",serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --paper:#14150F; --panel:#1B1C16; --ink:#E9E7DE; --ink-2:#B4B1A6;
+    --muted:#87857B; --rule:#2E2F27; --hair:#24251E;
+    --accent:#5FA98C; --warn:#D9744F; --gold:#C9A44B;}}
+  :root[data-theme="dark"]{
+    --paper:#14150F; --panel:#1B1C16; --ink:#E9E7DE; --ink-2:#B4B1A6;
+    --muted:#87857B; --rule:#2E2F27; --hair:#24251E;
+    --accent:#5FA98C; --warn:#D9744F; --gold:#C9A44B;}
+  :root[data-theme="light"]{
+    --paper:#F4F3EF; --panel:#FBFAF7; --ink:#1A1A17; --ink-2:#4C4A44;
+    --muted:#7E7C74; --rule:#DCD9D0; --hair:#E8E5DD;
+    --accent:#1F5C4A; --warn:#9C3B24; --gold:#8A6A1F;}
+
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);
+    line-height:1.65;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:74ch;margin:0 auto;padding:clamp(1.4rem,4vw,3.4rem) 1.15rem 6rem;
+    display:flex;flex-direction:column;gap:clamp(2rem,5vw,3.2rem);}
+  h1{font-family:var(--serif);font-weight:400;font-size:clamp(1.9rem,5vw,2.9rem);
+    line-height:1.12;letter-spacing:-.018em;margin:0;text-wrap:balance;}
+  h2{font-family:var(--serif);font-weight:400;font-size:clamp(1.35rem,3vw,1.8rem);
+    line-height:1.2;margin:0;letter-spacing:-.01em;text-wrap:balance;}
+  h3{font-family:var(--sans);font-size:1rem;font-weight:650;margin:0;
+    letter-spacing:-.005em;}
+  p{margin:0;}
+  .eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.15em;
+    text-transform:uppercase;color:var(--muted);}
+  .lede{font-size:1.1rem;color:var(--ink-2);}
+  .stack{display:flex;flex-direction:column;gap:1rem;}
+  .stack-s{display:flex;flex-direction:column;gap:.5rem;}
+  .note{font-size:.88rem;color:var(--muted);}
+  code{font-family:var(--mono);font-size:.86em;background:var(--hair);
+    padding:.06em .32em;border-radius:3px;}
+  a{color:var(--accent);}
+  hr{border:0;height:1px;background:var(--rule);margin:0;}
+  strong{font-weight:650;}
+
+  .toc{background:var(--panel);border:1px solid var(--rule);border-radius:4px;
+    padding:1rem 1.2rem;display:flex;flex-direction:column;gap:.3rem;}
+  .toc a{font-family:var(--mono);font-size:.8rem;text-decoration:none;
+    color:var(--ink-2);}
+  .toc a:hover{color:var(--accent);}
+  .toc b{font-family:var(--sans);font-size:.7rem;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:.2rem;}
+
+  .lesson{border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1.05rem;
+    display:flex;flex-direction:column;gap:.45rem;}
+  .lesson .what{font-size:.9rem;color:var(--ink-2);}
+  .lesson .took{font-family:var(--mono);font-size:.74rem;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.08em;}
+  .lesson.bad{border-left-color:var(--warn);}
+
+  table{border-collapse:collapse;width:100%;font-size:.88rem;}
+  th,td{text-align:left;padding:.55rem .7rem;border-bottom:1px solid var(--hair);
+    vertical-align:top;}
+  thead th{font-family:var(--mono);font-size:.68rem;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--muted);font-weight:600;}
+  td:first-child{font-weight:600;white-space:nowrap;}
+  .scroll{overflow-x:auto;}
+
+  details{background:var(--panel);border:1px solid var(--rule);border-radius:4px;
+    padding:.75rem .95rem;}
+  details+details{margin-top:.5rem;}
+  summary{cursor:pointer;font-weight:600;font-size:.95rem;list-style:none;
+    display:flex;gap:.6rem;align-items:baseline;}
+  summary::-webkit-details-marker{display:none;}
+  summary::before{content:"▸";color:var(--accent);font-size:.8em;flex:none;}
+  details[open] summary::before{content:"▾";}
+  details[open] summary{margin-bottom:.6rem;}
+  details .body{display:flex;flex-direction:column;gap:.6rem;font-size:.92rem;
+    color:var(--ink-2);}
+  details .body strong{color:var(--ink);}
+  .qgroup{display:flex;flex-direction:column;gap:.5rem;}
+  .tagline{font-family:var(--mono);font-size:.68rem;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--gold);}
+
+  .fig{background:var(--panel);border:1px solid var(--rule);border-radius:4px;
+    padding:1rem;font-family:var(--mono);font-size:.76rem;line-height:1.75;
+    color:var(--ink-2);overflow-x:auto;white-space:pre;}
+</style>
+
+<div class="wrap">
+
+<header class="stack-s">
+  <div class="eyebrow">Field notes · Model Context Protocol · written from a build</div>
+  <h1>MCP for product people</h1>
+  <p class="lede">I built an MCP server that four Claude agents played a
+    game-theory simulation through — 1,040 model decisions, about $19 of API
+    spend, and a lot of things that broke quietly. This is what I would want to
+    know before the next one, and what I would say if asked about it.</p>
+  <p class="note">Everything here is from that build. Where a lesson cost money
+    or a wrong result, it says so.</p>
+</header>
+
+<nav class="toc">
+  <b>Contents</b>
+  <a href="#what">1 · What MCP actually is, without the spec language</a>
+  <a href="#shape">2 · The shape of what we built</a>
+  <a href="#lessons">3 · Ten things the build taught me</a>
+  <a href="#choices">4 · Why X over Y — the decisions worth defending</a>
+  <a href="#pitfalls">5 · Pitfalls, ranked by how much they cost</a>
+  <a href="#qa">6 · Interview questions and answers</a>
+</nav>
+
+<hr>
+
+<!-- ─────────────────────────────────────────── -->
+<section class="stack" id="what">
+  <div class="stack-s">
+    <div class="eyebrow">1</div>
+    <h2>What MCP actually is, without the spec language</h2>
+  </div>
+
+  <p>MCP is a standard for letting a model call your software. That's it. The
+    value is that it's a <em>standard</em>: you describe your capabilities once,
+    and any MCP-speaking model can discover and use them without you writing a
+    bespoke integration per model.</p>
+
+  <p>The mental flip that matters for a PM: <strong>your product becomes the
+    server, and the model becomes the user.</strong> You are no longer designing
+    screens for a human who can tolerate ambiguity. You are designing an API for
+    a reader that takes your wording literally, has no memory between calls
+    except what you return, and pays by the token for everything you send it.</p>
+
+  <div class="fig">model (client)                    your system (server)
+     │                                    │
+     │  "what can you do?"                │
+     │ ─────────────────────────────────► │   tool list + descriptions
+     │ ◄───────────────────────────────── │   + JSON schemas
+     │                                    │
+     │  call harvest(amount=0.3)          │
+     │ ─────────────────────────────────► │   you run the logic
+     │ ◄───────────────────────────────── │   you return JSON
+     │                                    │
+     the model decides WHICH tool and WHEN. You decide what exists,
+     what it's called, what it says it does, and what comes back.</div>
+
+  <p>Four things are entirely yours, and each one is a product decision rather
+    than an engineering one:</p>
+
+  <table>
+    <thead><tr><th>You control</th><th>Why it's a product decision</th></tr></thead>
+    <tbody>
+      <tr><td>Which tools exist</td><td>You are defining the action space. An
+        agent cannot do what you did not expose.</td></tr>
+      <tr><td>What they're called</td><td>Names carry meaning the model acts on.
+        Ours cued an entire domain we were trying to hide.</td></tr>
+      <tr><td>The descriptions</td><td>This is prompt engineering wearing a
+        documentation costume. Length and enthusiasm change usage rates.</td></tr>
+      <tr><td>What you return</td><td>The agent can only reason about what's in
+        the response. Omitting a field silently removes a behaviour.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<hr>
+
+<!-- ─────────────────────────────────────────── -->
+<section class="stack" id="shape">
+  <div class="stack-s">
+    <div class="eyebrow">2</div>
+    <h2>The shape of what we built</h2>
+  </div>
+
+  <p>A shared-resource simulation. Four agents graze one field over 65 turns,
+    can talk to each other, can form binding-ish agreements, and can fine each
+    other. Each agent is an independent MCP client with its own bearer token.</p>
+
+  <div class="fig">15 tools, split by what they cost the agent:
+
+  FREE READS          look_around · get_status · listen_for_messages
+  (no turn used)      get_history · get_ledger · get_pacts
+
+  ONE PER TURN        harvest · move · plant · punish · pass_turn
+
+  FREE CHANNELS       say          (one message per turn)
+                      propose_pact · accept_pact · leave_pact</div>
+
+  <p><strong>That split is the whole design.</strong> Making observation free
+    and action scarce is an economic choice expressed through an API: it means
+    an agent is never punished for thinking, only for acting. Giving speech and
+    agreements their own channels means an agent can negotiate <em>and</em> eat
+    in the same turn — if talking had cost a turn, we would have been measuring
+    the price of coordination rather than whether coordination happens.</p>
+</section>
+
+<hr>
+
+<!-- ─────────────────────────────────────────── -->
+<section class="stack" id="lessons">
+  <div class="stack-s">
+    <div class="eyebrow">3</div>
+    <h2>Ten things the build taught me</h2>
+  </div>
+
+  <div class="lesson">
+    <h3>1 · Tool descriptions are product copy, not documentation</h3>
+    <p class="what">Our pact tools had the longest, warmest description in the
+      set — <em>"offer a public agreement that members take no more than that
+      per turn"</em> — while every other action got one clipped line. All four
+      agents proposed a pact on turn zero, before anything had happened.
+      Flattening the wording to match the others was a deliberate debiasing
+      step.</p>
+    <p class="took"><b>Transferable:</b> if a tool is described more
+      attractively than its neighbours, it gets used more. Audit descriptions
+      for <em>relative</em> enthusiasm, not just accuracy.</p>
+  </div>
+
+  <div class="lesson">
+    <h3>2 · Tool names leak semantics you cannot write your way out of</h3>
+    <p class="what">We tried to test whether agents were reasoning or just
+      recognising a famous scenario, so we rewrote every prompt and description
+      into neutral language. The tools were still called <code>harvest</code>
+      and <code>plant</code>. The framing survived.</p>
+    <p class="took"><b>Transferable:</b> names are part of the prompt. Choose
+      them for what they imply, not just what they do.</p>
+  </div>
+
+  <div class="lesson bad">
+    <h3>3 · Check the affordance before blaming the user — then check again</h3>
+    <p class="what">Agents never used the punishment tool. I called it a
+      behavioural finding, then discovered <code>get_pacts</code> returned who
+      was in an agreement but never who had <em>broken</em> one. The data
+      required to act wasn't in the response; I'd written the intent in a
+      comment and never implemented it.</p>
+    <p class="what">So I fixed it — breaches now arrive itemised,
+      <code>agreed 0.3, took 0.55</code> — and re-ran. <strong>Forty-four breach
+      notices were delivered and the agents still never punished anybody.</strong>
+      Nor in the run where punishing a promise-breaker was fined at double rate,
+      nor in the one where they were told to finish ahead of each other and
+      lowering a rival directly raised their own position. Four conditions,
+      1,040 decisions, zero fines.</p>
+    <p class="took"><b>Transferable:</b> two lessons, and the second is the one
+      people miss. Never conclude "they don't use it" until the information
+      needed to use it is in the response — <em>and</em> never assume fixing the
+      affordance will change the behaviour. I had the right answer for the wrong
+      reason, and only found out because I fixed the bug and re-measured
+      instead of declaring victory.</p>
+  </div>
+
+  <div class="lesson bad">
+    <h3>4 · The default failure mode is a silent no-op, not an error</h3>
+    <p class="what">Four separate times, a change produced plausible-looking
+      output with nothing happening: a config split the database so every action
+      was rejected while the run "succeeded" at turn 0; a renamed field made a
+      loop iterate zero times; a missing import turned one tool into an error
+      string the agent read and ignored. Traditional monitoring saw green.</p>
+    <p class="took"><b>Transferable:</b> agents swallow errors — a failed tool
+      call comes back as text and the agent carries on plausibly. Assert on
+      <em>outcomes</em> (did the world change?), never on absence of
+      exceptions.</p>
+  </div>
+
+  <div class="lesson">
+    <h3>5 · Multi-agent coordination is yours to build</h3>
+    <p class="what">The protocol has no notion of "wait for the other three".
+      Our game resolves all four agents' moves simultaneously, so we built a
+      barrier: each call writes an intent, blocks, and releases when everyone
+      has submitted or a timeout fires and absentees are recorded as passing.</p>
+    <p class="took"><b>Transferable:</b> MCP gives you request/response. Turn
+      order, fairness, deadlock and timeout policy are product decisions you own.</p>
+  </div>
+
+  <div class="lesson">
+    <h3>6 · Stateless by design, so identity rides on every call</h3>
+    <p class="what">The 2026 spec removed protocol-level sessions. Every call
+      must be answerable from a bearer token plus your database. That sounds
+      like a constraint and is actually a gift: a server restart mid-run loses
+      nothing except the in-flight barrier.</p>
+    <p class="took"><b>Transferable:</b> design for "any call could be the first
+      call". It makes horizontal scaling and crash recovery nearly free.</p>
+  </div>
+
+  <div class="lesson">
+    <h3>7 · Every field you return has a price, per call, per agent, per turn</h3>
+    <p class="what">We were pretty-printing a JSON blob in each response.
+      Removing the indentation cut input tokens by about a quarter. Separately,
+      the server was re-expanding a compact grid into verbose records — 180
+      characters where 122 would do, on every single call.</p>
+    <p class="took"><b>Transferable:</b> payload size is a recurring cost line,
+      not a one-off. Multiply by agents × turns × runs before deciding a field
+      is cheap.</p>
+  </div>
+
+  <div class="lesson">
+    <h3>8 · Cost per call is a moving target you must re-measure</h3>
+    <p class="what">I estimated $0.0029 per decision. After adding one feature
+      it was $0.0048, and on a stronger model $0.0143 — a 5× swing. My "$1.40
+      for a run" estimate became $2.29 in reality. Every added field pushed it
+      up.</p>
+    <p class="took"><b>Transferable:</b> instrument token spend from run one and
+      re-derive after every change. Do not extrapolate from an early sample.</p>
+  </div>
+
+  <div class="lesson">
+    <h3>9 · Model capabilities drift — ask, don't hardcode</h3>
+    <p class="what">Swapping models broke every call: the newer one takes an
+      "effort" parameter, the older one takes an explicit token budget, and
+      sending the wrong one is a hard 400. We replaced a hardcoded assumption
+      with a capability lookup at startup.</p>
+    <p class="took"><b>Transferable:</b> anything you hardcode about a model
+      rots. Discover capabilities at runtime and fail loudly when they change.</p>
+  </div>
+
+  <div class="lesson">
+    <h3>10 · Exposed ≠ usable</h3>
+    <p class="what">Punishment existed from the start. In one run agents
+      attempted it nine times and every attempt was refused, because the rule
+      required standing next to the offender — and offenders are rarely
+      adjacent. The feature was shipped, discoverable, and impossible to use.</p>
+    <p class="took"><b>Transferable:</b> track attempted-and-rejected calls
+      separately from successful ones. A high rejection rate on one tool is your
+      clearest usability signal.</p>
+  </div>
+</section>
+
+<hr>
+
+<!-- ─────────────────────────────────────────── -->
+<section class="stack" id="choices">
+  <div class="stack-s">
+    <div class="eyebrow">4</div>
+    <h2>Why X over Y — the decisions worth defending</h2>
+    <p class="note">These are the ones an interviewer can usefully push on.</p>
+  </div>
+
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Chose</th><th>Over</th><th>Because</th></tr></thead>
+    <tbody>
+      <tr><td>MCP</td><td>a bespoke REST API</td>
+        <td>tool discovery and schemas come free, and any MCP-speaking model can
+          connect without per-model glue. The cost is you inherit its
+          concurrency model — which is none.</td></tr>
+      <tr><td>Streamable HTTP</td><td>stdio transport</td>
+        <td>stdio is one process per client. We needed four concurrent clients
+          against one shared world, and a deployable surface.</td></tr>
+      <tr><td>Bearer token per seat</td><td>OAuth 2.1</td>
+        <td>correct for a closed demo; explicitly logged as insufficient for
+          production. Being able to name your own shortcut matters.</td></tr>
+      <tr><td>SQLite</td><td>in-memory state</td>
+        <td>the protocol is sessionless, so state must outlive any single call.
+          Restart-safety fell out for free.</td></tr>
+      <tr><td>Structured outputs</td><td>parsing free text</td>
+        <td>the model returns a schema-valid object every time. No parse
+          failures, no retry logic, and the reasoning arrives as a named field
+          rather than something to regex out.</td></tr>
+      <tr><td>Separate channels</td><td>one action per turn</td>
+        <td>if speaking costs a turn, an experiment about communication is
+          really measuring the price of speaking. Separating them keeps the
+          variable clean.</td></tr>
+      <tr><td>Free reads</td><td>metering everything</td>
+        <td>an agent should never be penalised for looking before acting.
+          Charging for observation produces agents that guess.</td></tr>
+      <tr><td>Labels assigned after</td><td>roles assigned upfront</td>
+        <td>if you tell an agent it is cautious and then report that it was
+          cautious, you have measured your own prompt. We classified conduct
+          after the fact, and kept a control where all agents got identical
+          instructions.</td></tr>
+      <tr><td>Capability lookup</td><td>a hardcoded model table</td>
+        <td>a table silently rots and fails as an aborted run rather than a
+          warning.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<hr>
+
+<!-- ─────────────────────────────────────────── -->
+<section class="stack" id="pitfalls">
+  <div class="stack-s">
+    <div class="eyebrow">5</div>
+    <h2>Pitfalls, ranked by how much they cost</h2>
+  </div>
+
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Cost</th><th>What happened</th><th>The guard</th></tr></thead>
+    <tbody>
+      <tr><td>$0.55</td><td>Two full runs made every model call, exited
+        successfully, and finished at turn zero — a config change had split the
+        database, so every action was rejected and only an unchecked field said
+        so.</td><td>A free dry run before any paid run; abort after two
+        consecutive rejected actions.</td></tr>
+      <tr><td>$0.64</td><td>A run died a fifth of the way in on a connection
+        timeout. The read timeout was set generously; the <em>connect</em>
+        timeout was left at its short default.</td><td>Set both. Add transport
+        retries.</td></tr>
+      <tr><td>Right answer,<br>wrong reason</td><td>"Agents never enforce the
+        rules" — they could not see who had broken one. Fixed it, re-ran, and
+        they still didn't. The claim held; the reasoning behind it
+        didn't.</td><td>Verify the information was in the response — then
+        re-measure after fixing it, rather than assuming the fix changed
+        anything.</td></tr>
+      <tr><td>A wrong finding</td><td>An A/B where the treatment leaked: we
+        filtered one endpoint and forgot that every <em>action</em> response
+        carried the same field.</td><td>Enumerate every channel a change must
+        cover, then assert the leak is closed.</td></tr>
+      <tr><td>A stale claim</td><td>Four "measured" constants were literals
+        pasted from an old run. They survived three changes to the world and
+        were still being printed as measurements.</td><td>Measurement writes to
+        a file; the consumer refuses to run if it was produced under different
+        conditions.</td></tr>
+      <tr><td>Silent</td><td>An import was missing, so one tool returned an
+        error string. Agents read it, ignored it, and the run looked
+        normal.</td><td>Assert on the shape of what the agent receives, not on
+        the absence of a crash.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p class="note">The pattern across all of them: <strong>in agent systems,
+    broken things look like working things.</strong> A human user files a bug. An
+    agent writes a plausible sentence and carries on.</p>
+</section>
+
+<hr>
+
+<!-- ─────────────────────────────────────────── -->
+<section class="stack" id="qa">
+  <div class="stack-s">
+    <div class="eyebrow">6</div>
+    <h2>Interview questions and answers</h2>
+    <p class="note">Click any question. Answers are written the way I would
+      actually say them — short, with a concrete example attached.</p>
+  </div>
+
+  <div class="qgroup">
+    <div class="tagline">Fundamentals</div>
+
+    <details><summary>What is MCP, in one minute?</summary>
+      <div class="body">
+        <p>It's a standard protocol for letting a model call your software.
+          Your system runs a server that advertises a set of tools — each with a
+          name, a description and a JSON schema — and the model acts as a client
+          that decides which to call and when.</p>
+        <p>The point of a standard is that you integrate once rather than per
+          model. <strong>The mental shift is that your product becomes an API
+          and the model becomes the user</strong> — one that reads your wording
+          literally and pays by the token for every byte you return.</p>
+      </div></details>
+
+    <details><summary>How is it different from just giving a model an API to call?</summary>
+      <div class="body">
+        <p>Mechanically it's similar; the difference is discovery and
+          uniformity. The model asks the server what it can do and gets back
+          machine-readable schemas, so you don't hand-write per-model tool
+          definitions or maintain them as models change.</p>
+        <p>What you <em>don't</em> get is anything above request/response. No
+          sessions, no turn-taking, no coordination between clients. I built a
+          barrier for multi-agent turn resolution myself — that's not something
+          the protocol offers.</p>
+      </div></details>
+
+    <details><summary>Walk me through the architecture you built.</summary>
+      <div class="body">
+        <p>An MCP server over streamable HTTP exposing 15 tools, with four
+          Claude agents connecting as independent clients, each with its own
+          bearer token. State lives in SQLite because the protocol is
+          sessionless — identity has to be recoverable from the token on every
+          single call.</p>
+        <p>The tools split three ways: free reads that cost nothing, one action
+          per turn, and separate free channels for speech and for agreements.
+          That split is the actual design — it decides what an agent is
+          penalised for.</p>
+      </div></details>
+
+    <details><summary>Why streamable HTTP rather than stdio?</summary>
+      <div class="body">
+        <p>stdio is one process per client, which is fine for a desktop
+          integration. I needed four concurrent clients against one shared
+          world, plus something deployable. HTTP gave me both, at the price of
+          having to handle auth and concurrency myself.</p>
+      </div></details>
+  </div>
+
+  <div class="qgroup" style="margin-top:1.4rem">
+    <div class="tagline">Product judgement</div>
+
+    <details><summary>How do you decide what to expose as a tool?</summary>
+      <div class="body">
+        <p>Same question as deciding what goes in a UI: what can a user
+          <em>do</em>, and what must they know to decide? I'd add two rules
+          specific to agents.</p>
+        <p><strong>One — an agent can only do what you expose and only reason
+          about what you return.</strong> We had a punishment feature nobody
+          used, and the response never told agents who had broken a rule. I
+          fixed that, delivered breaches itemised, and they <em>still</em> never
+          used it — so the missing data was a real bug and not the reason. Both
+          halves matter: check the affordance, then re-measure rather than
+          assuming the fix worked.</p>
+        <p><strong>Two — tool descriptions are prompt engineering.</strong> Our
+          most warmly-described tool was used by every agent on the first turn.
+          Description length changes usage rates, so I now audit them for
+          relative enthusiasm, not just accuracy.</p>
+      </div></details>
+
+    <details><summary>How do you know if an MCP feature is working?</summary>
+      <div class="body">
+        <p>Not by absence of errors, because agents swallow errors — a failed
+          call comes back as text and the agent writes something plausible and
+          continues. I'd track three things:</p>
+        <p><strong>Attempt rate</strong> (is it being called at all),
+          <strong>rejection rate</strong> (called and refused — our clearest
+          usability signal; one tool was attempted nine times and refused nine
+          times because the precondition was almost never satisfiable), and
+          <strong>outcome assertions</strong> — did the world actually change.
+          We had two full runs pass every superficial check while nothing
+          happened at all.</p>
+      </div></details>
+
+    <details><summary>How do you think about cost?</summary>
+      <div class="body">
+        <p>As a recurring line item, not a one-off. Every field you return is
+          paid for on every call, by every agent, every turn. Removing
+          pretty-printing from one JSON blob cut input tokens by a quarter.</p>
+        <p>And re-measure constantly. My per-decision cost went from $0.0029 to
+          $0.0048 after one feature, then to $0.0143 on a stronger model. An
+          early estimate I gave was wrong by 60% within a day.</p>
+      </div></details>
+
+    <details><summary>How would you productionise this?</summary>
+      <div class="body">
+        <p>Three things I'd fix before anyone else touched it. Auth — bearer
+          tokens per seat are fine for a closed demo, OAuth for real. Horizontal
+          scale — my turn barrier is in process memory, so two replicas
+          desynchronise silently; that state belongs in the database or a
+          coordinator. And observability — I'd instrument tool attempt,
+          rejection and latency per tool, since rejection rate was the most
+          informative number I had.</p>
+      </div></details>
+  </div>
+
+  <div class="qgroup" style="margin-top:1.4rem">
+    <div class="tagline">Failure and debugging</div>
+
+    <details><summary>Tell me about something that broke.</summary>
+      <div class="body">
+        <p>My favourite, because it looked like a result. Four agents played a
+          full run, made every model call, exited cleanly — and finished at turn
+          zero with nothing having happened. A config change had pointed two
+          components at different database files, so every action came back
+          "unknown token" and the agents just carried on.</p>
+        <p>It cost about $0.55 and taught me the real lesson of the project:
+          <strong>in agent systems, broken things look like working
+          things.</strong> A human files a bug. An agent writes a plausible
+          sentence and continues. So I added a free dry run as a gate before any
+          paid run, and made the loop abort after two consecutive rejected
+          actions.</p>
+      </div></details>
+
+    <details><summary>Tell me about a wrong conclusion you drew.</summary>
+      <div class="body">
+        <p>I reported that agents never enforce rules on each other and framed
+          it as a finding about their behaviour. Then someone asked the obvious
+          question — could they even see who had broken a rule? They couldn't.
+          The response carried who was in an agreement and never who had
+          violated one. I'd written the intent in a code comment and never
+          implemented it, so it looked done.</p>
+        <p>The part I like is what happened next. I fixed it, re-ran, and
+          <strong>they still never punished anyone</strong> — with breaches
+          handed to them itemised, with promise-breaking fined at double rate,
+          and in a condition where punishing a rival directly improved your own
+          standing. So my original claim turned out to be true, and my reasoning
+          for it had been wrong.</p>
+        <p>That's the habit I took away: a conclusion that survives fixing the
+          bug underneath it is worth something. One that you never re-test is
+          just a guess that happened to sound right.</p>
+      </div></details>
+
+    <details><summary>How do you A/B test with agents?</summary>
+      <div class="body">
+        <p>Carefully, and with more replication than feels necessary. Two
+          mistakes I made are worth stating.</p>
+        <p><strong>The treatment leaked.</strong> I filtered a field out of one
+          endpoint and forgot every action response carried the same field, so
+          both arms were contaminated. Enumerate every channel a change has to
+          cover and then assert the leak is closed.</p>
+        <p><strong>One seed proved nothing.</strong> I had a beautiful result on
+          the first seed that reversed exactly on the second. Non-determinism
+          means a single run is an anecdote, and I now treat any single-seed
+          result as a hypothesis.</p>
+      </div></details>
+
+    <details><summary>What surprised you most?</summary>
+      <div class="body">
+        <p>How much of what looked like agent behaviour was actually my API
+          design. Agents didn't punish — because the data wasn't in the
+          response. They all proposed agreements immediately — partly because
+          that tool had the most enthusiastic description. They ignored a
+          competitive objective entirely — 260 decisions, not one mention of
+          being ahead.</p>
+        <p>Every time I thought I'd found something about the model, at least
+          half of it was something about the interface I'd built. The exception
+          proved the rule: the refusal to punish survived every fix I threw at
+          it — visibility, a doubled penalty, a reachability change, and an
+          objective where punishing paid. That one really was the model.</p>
+      </div></details>
+  </div>
+
+  <div class="qgroup" style="margin-top:1.4rem">
+    <div class="tagline">The sharp ones</div>
+
+    <details><summary>Why MCP rather than function calling directly?</summary>
+      <div class="body">
+        <p>For a single model and a handful of functions, direct function
+          calling is simpler and I'd use it. MCP earns its keep when you have
+          multiple clients, want the tool surface to be discoverable rather than
+          hand-declared per integration, or expect to swap models.</p>
+        <p>I'd be honest that it isn't free: you take on auth, concurrency and
+          transport that a direct integration wouldn't have made you think about.</p>
+      </div></details>
+
+    <details><summary>What would you do differently?</summary>
+      <div class="body">
+        <p>Instrument before building. I added token tracking after the first
+          paid run and cost estimates after that, so my early numbers were
+          guesses and one of them was wrong by 60%.</p>
+        <p>And I'd freeze the design sooner. I improved the system roughly eight
+          times during the study, and each change invalidated the earlier
+          results — I ended with several runs measuring worlds that no longer
+          existed. There's a version of that project that never gets measured
+          because the instrument keeps improving.</p>
+      </div></details>
+
+    <details><summary>How do you stop an agent doing something expensive or destructive?</summary>
+      <div class="body">
+        <p>In code, not in a prompt. I had a hard budget ceiling checked before
+          every model call and updated from usage after it — crossing it raises
+          and stops the run rather than warning. Same for turn caps, so a
+          runaway loop can't drain credit.</p>
+        <p>The principle: anything you'd write in a prompt as "please don't", an
+          agent will eventually do. Constraints belong in the layer the agent
+          cannot talk its way past.</p>
+      </div></details>
+  </div>
+</section>
+
+<hr>
+
+<footer class="stack-s">
+  <p class="note">Built as an MCP server over streamable HTTP with four
+    concurrent Claude clients: 15 tools, a simultaneous-turn barrier, SQLite
+    persistence, structured outputs, and a hard in-code budget ceiling.
+    Four experimental conditions, 1,040 model decisions, ~$19 of API spend.</p>
+</footer>
+
+</div>
