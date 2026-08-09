@@ -2,174 +2,162 @@
 
 Status and next steps, kept here so a fresh session can pick up without
 re-deriving anything. The README describes the project; this file describes
-where the work stopped.
+where the work stopped and what it cost to learn.
 
 ## Where it stands
 
 | Phase | State |
 |---|---|
-| 0 — decisions locked | done (world size, regrowth, tick model, budget, no win condition, named) |
-| 1 — world engine | done. `world.py`, `harness.py`, 88 tests, tuned so the dilemma is real |
-| 2 — MCP layer | done. `server.py` + `store.py`, 17 tests, gate passes (`play.py --self-test`) |
-| 3 — deploy | **built but never deployed.** Dockerfile, `fly.toml`, `render.yaml`, health, admin, rate limiting, 16 tests. Deferred deliberately — see below |
-| 4 — agents | **first real run done** 2026-08-08: 5 ticks, 4 agents, 20 Haiku calls, $0.15. Dispositions diverge, a pact forms and breaks. n=1 |
-| 5 — observatory | not started. An earlier visualiser exists (`viz_template.html`) but renders precomputed frames, not the event log |
-| 6 — ablations | not started for LLM agents. Scripted equivalents are done (`harness.py --dilemma`, `evolve.py`) |
-| 7 — write-up | not started |
+| 0 — decisions locked | done |
+| 1 — world engine | done, and **rebuilt this session**: 4×4 board, upkeep, pacts, evidence-based punishment, survivable collapse. 155 tests |
+| 2 — MCP layer | done. `server.py` + `store.py`, pact tools added, gate passes (`play.py --self-test`) |
+| 3 — deploy | built, never deployed. Deliberate — nobody is expected to connect and play |
+| 4 — agents | **run for real.** Six paid runs on Haiku, one in the rebuilt world. Sonnet 5 is the default and has never been run |
+| 5 — observatory | done differently than planned: an isometric canvas playback driven by real run data, published as an artifact |
+| 6 — ablations | horizon A/B done and **failed to replicate**. Monitoring × punishment is the live one now |
+| 7 — write-up | drafts exist; the lead keeps changing as results land |
 
-## The blocker is cleared — and what it revealed
+## The world, as it now stands
 
-The first real run happened on 2026-08-08. The agents play sensibly; the
-premise holds. Three things came out of it that change the plan.
+Every number here is measured from the engine, not assumed.
 
-**1. The agents do not know when the run ends.** `status` reports
-`ticks_remaining` from `world.TICKS` (100), not from `--ticks`
-(`store.py:325`). In the 5-tick run every agent reasoned as though 97 turns of
-future remained, and the maximizer's pivot to cooperation was explicitly a
-shadow-of-the-future calculation over that horizon. This is not a cosmetic
-mismatch: a *known finite* horizon should unravel cooperation by backward
-induction, so the perceived horizon is an independent variable and right now
-it is an accident. Decide deliberately whether agents see the true end, then
-make `--ticks` and the reported horizon agree.
-
-**2. Costs are ~15x the back-of-envelope.** 20 calls cost $0.1519, i.e.
-$0.0076/call, because thinking roughly triples output tokens and the whole
-observation JSON sits uncached in every user turn. A 40-tick run is ~160 calls
-≈ $1.20; a 100-run Phase 6 matrix is ~$120, not ~$10. Either budget for that or
-cache/trim the observation payload first.
-
-**3. False accusations arose with no injected noise.** Agents accused each
-other of breaking a pact using pre-pact harvests as evidence, and the pact died
-of it — the same failure the scripted `--noise-scan` produces with a 10%
-misreport rate. Worth checking whether the ledger's presentation invites it.
-
-Seeds 1 and 2 are done under both horizon conditions. The API budget is spent
-(~$4.58 of $5), so further seeds need new funding or a free provider — see the
-cost note. Two seeds was exactly enough to kill the prettiest finding, which is
-the argument for funding several more rather than none.
-
-## Decisions that would otherwise get re-litigated
-
-- **Nobody is expected to connect and play.** The goal is to *show results about
-  how agents reason*, not to run a public game. That is why Phase 3 is built but
-  not deployed, and why the observatory (Phase 5) matters more than hosting.
-- **Deployment, if it ever happens:** Fly is the cheapest and does not need a
-  GitHub remote; Render is push-to-deploy and now has the remote it needed. A
-  Cloudflare tunnel from a laptop satisfies the Phase 3 gate for free.
-- **Model default is `claude-haiku-4-5`**, chosen deliberately for the ~16,000
-  calls a full Phase 6 matrix implies. `--model claude-opus-5` for a showcase run.
-- **40 ticks, not 100.** The world collapses around tick 20 under greed, so the
-  whole arc fits in 40 at a fraction of the cost.
-- **One server instance only.** The tick barrier is in process memory; two
-  replicas desynchronise silently. See the Dockerfile.
-- **The repo is public on GitHub** — https://github.com/bharatisaket/overgraze,
-  MIT, default branch `master`, pushed 2026-08-08 at 28 commits. History was
-  scanned for credentials before publishing and was clean. Anything committed
-  from here is public immediately, so keep `.env`, `overgraze.db`, `tokens.json`
-  and `traces.jsonl` in `.gitignore` where they already are.
-
-## Open questions
-
-1. **Does the post lead with the game theory or the engineering?** They are
-   different posts from the same repo, and the answer decides whether to invest
-   in Phase 5 (observatory) or Phase 7 (connect-your-own-agent).
-   On the evidence so far the sturdiest hook is the bluffed sanctions, which
-   needs no further spend; the horizon result is prettier but rests on one seed.
-2. The `sanctioner` result rests on 8 seeds and deserves the 25-seed treatment
-   the noise scan got before it is published.
-3. The observatory should be rebuilt as a pure function of `(event_log, tick)`.
-   The existing page renders precomputed frames, which cannot show the ledger,
-   speech, or ghost-overlay ablations.
-
-## Findings worth not losing
-
-Measured, reproducible, and the reason the world is tuned the way it is:
-
-- **Unrestrained greed destroys 53% of achievable value** — planner optimum
-  70.1, open access 33.0, commons dead by tick 15 (`python theory.py`).
-- **Cooperation must be near-universal.** Two defectors of four destroy the
-  commons 68% of the time.
-- **Axelrod's islands survive the move to a commons, but only with assortment.**
-  25% reciprocators die out entirely with neither clustering nor monitoring;
-  they fixate with both (`python evolve.py --scan`).
-- **A 10% *misreading* rate destroys a commons of four agents who all practised
-  restraint** — perception noise alone, no extra resource taken, 0% → 100%
-  collapse. The mistake is the accusation, not the harvest.
-- **Patience beats generosity.** Under perception noise, demanding more evidence
-  before retaliating took fixation from 24% to 76%; probabilistic forgiveness
-  did nothing (`python evolve.py --noise-scan`).
-- **Costly punishment underperforms retaliation-in-kind here**, because in a
-  commons retaliating by over-harvesting is *profitable* while a sanction is
-  purely costly — the opposite of public-goods experiments.
+- **4×4 board, four agents.** It was 6×6 and the dilemma never happened: across
+  four measured runs two agents stood on the same cell in 0%, 0%, 0% and 48% of
+  ticks. They were farming separate plots, not sharing a commons. Not 3×3 —
+  with `VISION = 1` an agent in the centre of a 3×3 sees everything, and
+  unverifiable claims are the basis of deception under local monitoring.
+- **`UPKEEP = 0.08` per tick, charged to everyone.** Without it restraint was
+  free and agents hoarded: they held the field near capacity and harvested
+  9–18% of what they were allowed, parking the commons far above the stock
+  where it grows fastest.
+- **`r = 0.15`.** At 0.05 upkeep drains 0.32/tick against an MSY of 0.20 and the
+  world is unsurvivable by construction.
+- **Payoffs: T=25.1 R=8.7 P=3.6 S=2.2**, folk threshold δ ≥ 0.76. All four
+  dilemma checks pass; half the group defecting kills the commons 51% of the
+  time; open access dies at tick 8; the tragedy costs 75% of the achievable.
+- **A viable pact cap sits between 0.08 and 0.15.** Below upkeep, honouring it
+  starves you. Above the per-agent MSY share, the field cannot carry it. At
+  0.18 it collapses. This band is the single most important number in the file.
 
 ## Findings from the language-model agents
 
-All from `claude-haiku-4-5`, thinking off, four dispositions at one table.
-Weaker evidence than the scripted work above: single runs, not seed averages.
-Traces are gitignored; regenerate with the commands given.
+Weaker evidence than the scripted work: single runs, and all of it on
+`claude-haiku-4-5`. Traces are gitignored.
 
-- **Agents derive the folk theorem unprompted.** The maximizer, whose prompt
-  says only to maximise its own harvest and never mentions collapse or other
-  agents, spent two ticks extracting — *"the commons is declining but that's
-  not my concern"* — and then pivoted: *"0.4 x 97 = 38.8 future harvest vs.
-  maybe 2-3 more maxed harvests before collapse... This is rational
-  self-interest, not altruism—longer game = higher score."* It priced the
-  shadow of the future explicitly.
-- **They negotiate a quantitative norm nobody specified.** The negotiator
-  proposed a 0.4/turn cap by tick 0; three agents had signed on by tick 3.
-- **Seeing the end does *not* visibly change how they invest — that result
-  failed to replicate.** 40 ticks, `--horizon true` vs `hidden`, treatment
-  integrity verified in all four runs. Plants by phase, early/mid/late:
+- **Agents derive the folk theorem unprompted.** The maximizer, told only to
+  maximise its own harvest, spent two ticks extracting — *"the commons is
+  declining but that's not my concern"* — then pivoted: *"0.4 × 97 = 38.8
+  future harvest vs. maybe 2-3 more maxed harvests before collapse… This is
+  rational self-interest, not altruism—longer game = higher score."*
+- **They use the pact tools, and they ratchet the cap down.** Given
+  `propose_pact` for the first time, they proposed 0.40, then 0.25, then 0.15,
+  joined and left repeatedly, and recorded only one breach in 21 ticks. Nobody
+  told them to tighten it. Every cap they chose was above upkeep — they avoided
+  the trap the scripted demo fell into twice.
+- **Upkeep fixed the over-conservation.** 0.134 per agent per tick, which is
+  **89% of the sustainable optimum**, against 9–18% of cap in every earlier
+  run. This is the clearest single effect of any change made this session.
+- **Agents bluff about sanctions they cannot apply.** With punish disabled they
+  attempted it anyway, were refused every time, and announced sanctions in
+  speech regardless — 3/7, 5/12, 1/6, 2/5 attempts/claims across four runs.
+  Every run, both seeds, both conditions. The only fully replicated result.
+- **Seeing the end does *not* change how they invest — that failed to
+  replicate.** Plants by phase, early/mid/late: seed 1 gave 12/12/5 visible and
+  19/19/23 hidden, textbook backward induction. Seed 2 reversed it exactly.
+  Two seeds, opposite directions. Recorded because it had already been written
+  up as a finding and the temptation to keep it was real.
+- **The outcome difference held on both seeds, weakly.** Agents shown a
+  countdown finished with a lower commons and took more. Two of two is what a
+  coin does one time in four.
+- **Haiku misreads rules under load.** One agent read the pasture's viability
+  floor as a personal score target and played against it for the rest of the
+  run. That is why the default model is now `claude-sonnet-5`.
 
-  | | early | mid | late |
-  |---|---|---|---|
-  | seed 1, counter visible | 12 | 12 | 5 |
-  | seed 1, hidden | 19 | 19 | 23 |
-  | seed 2, counter visible | 2 | 6 | 13 |
-  | seed 2, hidden | 3 | 17 | 1 |
+## What was built this session
 
-  Seed 1 looked like textbook backward induction: investment collapsing as the
-  end approaches, and rising when there is no end in sight. Seed 2 reverses it
-  exactly. Two seeds, opposite directions, so the planting trajectory is noise
-  at this sample size and nothing should be claimed from it. Recorded because
-  the seed-1 pattern was written up as a finding before seed 2 existed, and the
-  temptation to keep it was real.
+- **Pacts as objects.** `propose_pact` / `accept_pact` / `leave_pact` over MCP,
+  with terms, membership and breach events carrying who witnessed them.
+  Compliance became arithmetic instead of a reading of the transcript.
+- **Punishment on by default, reach follows evidence.** You may fine someone
+  you can see, or someone you witnessed within `PUNISH_MEMORY` ticks. Adjacency
+  alone made enforcement impossible: the first real run in this world attempted
+  nine punishments and every one was refused for range. **This makes monitoring
+  decide whether a norm can be enforced at all**, which is Ostrom's claim and
+  was previously unrepresented.
+- **Survivable collapse.** `end_on_collapse=False` records the floor and lets
+  the world continue. `SEED_BANK` adds recruitment scaled to how empty the
+  field is — logistic growth is zero at zero, so without it a stripped commons
+  is dead for ever and any run reaching the floor could only flatline. Measured:
+  stock 16.0 → 2.18, floor crossed at tick 21, back to 14.08 by tick 80.
+  **Default stays `True`** so the calibration and every existing test still
+  measure the world they were written against.
+- **`lies.py`** — audits a trace for statements the ledger contradicts: false
+  self-reports, false compliance claims, phantom sanctions. Accusations are
+  counted and deliberately **not** scored, because a wrong accusation may be an
+  honest misreading and nothing outside the speaker distinguishes them.
+- **`demo_run.py`** — the real engine driven by scripted policy, so the shape
+  of an outcome can be inspected without paying for one.
 
-- **The outcome difference did hold on both seeds, weakly.** Agents shown the
-  countdown ended with a lower commons (29.99 vs 33.20; 30.00 vs 32.67) and
-  took more in total (15.91 vs 8.33; 14.84 vs 10.84). Same direction twice,
-  which is 2 of 2 — about what a coin does one time in four. Suggestive,
-  unpublishable, and the obvious thing to spend the next budget on.
-- **Agents bluff about sanctions they cannot apply.** With `punish` disabled,
-  they attempted it anyway (every attempt rejected: `punish is disabled in this
-  run`) and then announced sanctions in speech — 3 attempts/7 claims and 5/12
-  in the clean pair, 2/6 and 5/23 before it. Peers sometimes believe it and
-  adjust; the maximizer once caught it (*"Agent 3 has declared they are
-  punishing me, but punish is disabled"*). Attempts and claims across the four
-  clean runs: 3/7, 5/12, 1/6, 2/5 — **every run, both seeds, both horizon
-  conditions.** It is the only finding here that survived replication, and it
-  was not what any of these runs set out to measure.
-- **A steward can finish below zero.** −0.10 in one run: planting costs the
-  planter, so the commons survived partly because one agent paid for it.
-- **Haiku misreads rules under load.** The maximizer at tick 37: *"The collapse
-  floor is 9.0, so I need to reach 9.0 by tick 40"* — confusing the commons
-  viability floor with a personal score target. Comprehension is a live
-  variable; check it before attributing behaviour to disposition.
+## Costs, measured
 
-### What these cost
+Per call rises as the observation payload grows; pacts added roughly 10%.
 
-$0.0029 per decision after the cost work, so a 40-tick four-agent run is about
-$0.65 — input grows with accumulated history and notes, so early-tick
-extrapolation understates it. The whole set of findings above cost about $4.60.
+| | per call | 40 ticks (160 calls) | 90 ticks (360) |
+|---|---|---|---|
+| Haiku 4.5 | $0.0048 | $0.76 | $1.72 |
+| Sonnet 5 | $0.0143 | $2.29 | **$5.15** |
 
-### Two failures worth remembering
+**Everything that is not a model call costs nothing** — tests, `theory.py`,
+`harness --dilemma`, `evolve.py`, `demo_run.py`, `lies.py --demo`, and every
+`--dry-run` gate. The only spend in this project has ever been model calls.
 
-- A 40-tick pair made all 320 model calls, exited 0, and finished at **tick 0**
-  with every action rejected, because `store.connect()` and `server.py`
-  resolved different database files. $0.55 for nothing. Actions that fail twice
-  running now abort the run, and a `--dry-run` — which exercises MCP, the
-  database and the barrier for free — is the gate before any paid run.
-- The first horizon A/B was invalid: `apply_horizon` filtered `get_status` but
-  every *action* also returns `ticks_remaining`, so the hidden condition still
-  saw a countdown. The direction survived the fix, which was luck. Enumerate
-  every channel a treatment has to cover before spending on it.
+**Spent: $4.98 of $5**, across seven paid runs. The full 90-tick arc on Sonnet 5
+needs a fresh budget.
+
+## Procedure that was learned the expensive way
+
+- **A `--dry-run` before any paid run.** It exercises MCP, the database and the
+  tick barrier for free. Skipping it cost $0.55 on a pair of 40-tick runs that
+  made all 320 model calls and finished at tick 0 with every action rejected.
+- **Actions that fail twice running abort the run.** A broken run is not a bad
+  decision.
+- **Enumerate every channel a treatment has to cover.** The first horizon A/B
+  was invalid because `apply_horizon` filtered `get_status` and not the status
+  blob every *action* returns.
+- **A measured number must not become a literal.** `theory.py` carried four
+  payoff constants with a comment saying which command produced them; they
+  survived a change of grid size, regrowth rate and the arrival of upkeep,
+  still printed as measurements. `harness --dilemma` now writes `payoffs.json`
+  with the constants it measured under, and `theory.py` refuses stale files.
+- **Rivalry has to be constructed; it never appears on its own.** Three times
+  now: nine cells per agent on the 6×6, foragers walking a fixed bearing into
+  the east wall, and foragers parked on their starting corners farming one cell
+  each. Every time it silently removed the contention the world exists to have.
+
+## Open questions
+
+1. **The live Sonnet 5 run.** Everything is built for it and it has never been
+   made. ~$5.15 for the full arc.
+2. **Monitoring × punishment is now the experiment worth running.** Enforcement
+   reach is bounded by observation reach, so `local` vs `global` tests whether
+   a norm can be policed at all. This replaces the horizon A/B, which died.
+3. **Does the enforcer always finish last?** In the scripted run the negotiator
+   threw all 17 fines and ended below the defector it was policing, while the
+   two who let someone else enforce finished first — the second-order
+   free-rider problem, unstaged. Whether language models reproduce it is the
+   sharpest question this world can now ask.
+4. The `sanctioner` result still rests on 8 seeds.
+5. Nothing carries between runs. The greedy→ruin→cooperate arc now fits inside
+   one episode thanks to survivable collapse, so cross-episode memory is
+   optional rather than required — but it is untested.
+
+## Published
+
+- Isometric playback of a real run — grass drawn blade by blade, pact
+  pennants, sickle swings, live scorecard: `claude.ai/code/artifact/c68000ac-9546-4e78-84cd-1b93d09239c5`
+- Four measured game-theory results with the agents' behaviour beside them:
+  `claude.ai/code/artifact/cfd9eab7-31d6-4961-9a96-259aaf949975`
+- The deception audit, demonstrated on deliberately fabricated events:
+  `claude.ai/code/artifact/304cb00c-d6e9-4909-b1e4-2857be5026bb`
+
+Artifacts are private until shared from the page's own share menu.
