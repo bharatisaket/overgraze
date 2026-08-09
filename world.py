@@ -38,7 +38,19 @@ from typing import Iterable, Sequence
 import numpy as np
 
 # ── world constants ───────────────────────────────────────────────────────────
-N = 6              # grid is N x N cells
+# Four agents on sixteen cells. It was thirty-six, and at that size the dilemma
+# never actually happened: across four measured 40-tick runs, two agents stood on
+# the same cell in 0%, 0%, 0% and 48% of ticks, at a mean separation of 5.7-6.4
+# cells. They were not sharing a commons, they were farming separate plots and
+# shouting across the field. A common-pool resource has to be *rival*; at nine
+# cells per agent this one was not. Four cells per agent forces the collisions
+# that make it one.
+#
+# Not 3x3, which would be more rival still: with VISION = 1 an agent in the
+# centre of a 3x3 field observes every cell, and unverifiable claims -- the whole
+# basis of deception under local monitoring -- become impossible. 4x4 is where
+# rivalry and partial observability can both exist.
+N = 4              # grid is N x N cells
 CAP = 1.0          # max resource a single cell can hold
 TAKE = 0.55        # max an agent may harvest in one tick
 PLANT = 0.15       # resource a plant() adds to the agent's cell
@@ -57,6 +69,21 @@ SAY_LIMIT = 140    # characters
 
 PUNISH_COST = 0.2  # score the punisher forfeits
 PUNISH_FINE = 0.6  # score the punished loses
+
+# What it costs to exist for one tick, charged to every agent whatever it does.
+#
+# Without this, restraint is free and the measured equilibrium was absurd: agents
+# held the field at 30-33 of 36 and harvested 9-18% of what they were permitted,
+# parking the commons far above the stock where it grows fastest and starving
+# themselves of yield. Nothing punished hoarding, so they hoarded.
+#
+# Upkeep is the "if I don't take it, someone else will" pressure that drives real
+# commons tragedies: standing still now loses you score, so every agent must
+# engage with the resource, and the question stops being whether to harvest and
+# becomes how much. It must stay below the per-agent share of maximum sustainable
+# yield or the world is unsurvivable by construction -- see theory.py, which is
+# the check, not this comment.
+UPKEEP = 0.08
 
 # The commons is ruined when it can no longer support four foragers, not when it
 # is literally empty. At a quarter of capacity the average cell holds 0.25 --
@@ -148,6 +175,9 @@ class State:
     speech_radius: int | None = None        # None = grid-wide broadcast
     share_stock: bool = True                # agents may see the commons total
     monitoring: str = "local"               # 'none' | 'local' | 'global'
+    # Per-tick cost of existing, charged to every agent. Zero reproduces the
+    # old world, where hoarding was free and the agents duly hoarded.
+    upkeep: float = UPKEEP
     # Two kinds of noise, deliberately separate. Conflating them makes the
     # forgiveness question untestable: a trembling hand both fakes a defection
     # signal AND really takes more resource, so a collapse cannot be attributed
@@ -630,9 +660,12 @@ def apply_actions(state: State, actions: Iterable[Action]) -> tuple[State, list[
         events.append({"t": state.tick, "type": "speech", "agent": aid,
                        "text": msg.text, "heard_by": list(heard)})
 
+    # Upkeep is charged to everyone, unconditionally and after every other
+    # delta, so that passing, moving and being punished all cost the same living
+    # expense as harvesting. It is what makes doing nothing a losing move.
     agents = tuple(
         replace(a, y=destination(a.id)[0], x=destination(a.id)[1],
-                score=a.score + deltas[a.id])
+                score=a.score + deltas[a.id] - (state.upkeep if not state.collapsed_at else 0.0))
         for a in state.agents
     )
 

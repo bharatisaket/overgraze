@@ -111,7 +111,7 @@ def folk_threshold(T: float, R: float, P: float) -> float:
     return (T - R) / (T - P) if T > P else 0.0
 
 
-def report(r: float = 0.05) -> None:
+def report(r: float = 0.15) -> None:
     opt, opt_path = planner_optimum(r)
     oa, oa_path, oa_died = open_access(r)
     y, s_star = msy(r)
@@ -147,7 +147,40 @@ def report_equilibrium(T: float, R: float, P: float, S: float) -> None:
     print("  failure of reasoning -- it is correct play.")
 
 
+def measured_payoffs(r: float) -> dict:
+    """Read the payoffs `harness.py --dilemma` measured, refusing stale ones.
+
+    These used to be four literals in this file with a comment saying where
+    they came from. The comment stayed true and the numbers did not: the grid
+    shrank, the regrowth rate changed and upkeep arrived, and the same four
+    numbers went on being printed as measurements of a world that no longer
+    existed. A literal cannot notice that it is stale, so it is not allowed to
+    be a literal any more.
+    """
+    import json
+    from pathlib import Path
+    from world import CAPACITY, N, UPKEEP
+
+    path = Path(__file__).with_name("payoffs.json")
+    if not path.exists():
+        raise SystemExit(
+            "no payoffs.json -- run `python harness.py --dilemma` first; "
+            "the payoff matrix is measured from the engine, not assumed here")
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    was = data.get("measured_in", {})
+    now = {"N": N, "capacity": CAPACITY, "r": r, "upkeep": UPKEEP}
+    drift = {k: (was.get(k), v) for k, v in now.items() if was.get(k) != v}
+    if drift:
+        raise SystemExit(
+            "payoffs.json was measured in a different world -- "
+            + ", ".join(f"{k}: {old} -> {new}" for k, (old, new) in drift.items())
+            + "\nre-run `python harness.py --dilemma`")
+    return data
+
+
 if __name__ == "__main__":
-    report(0.05)
-    # measured payoffs from `python harness.py --dilemma`
-    report_equilibrium(T=38.7, R=15.6, P=8.8, S=6.9)
+    R_TUNED = 0.15
+    report(R_TUNED)
+    p = measured_payoffs(R_TUNED)
+    report_equilibrium(T=p["T"], R=p["R"], P=p["P"], S=p["S"])

@@ -37,6 +37,7 @@ import anthropic
 import httpx2
 
 from mcp import ClientSession
+from mcp.shared.exceptions import MCPError
 from mcp.client.streamable_http import streamable_http_client
 
 import dispositions
@@ -213,7 +214,16 @@ class Agent:
         return dispositions.DISPOSITIONS[self.disposition] + "\n\n" + HOW_TO_ANSWER
 
     async def call(self, tool: str, **args) -> dict:
-        res = await self.session.call_tool(tool, args)
+        # When the commons collapses the run ends underneath any agent still
+        # blocked on the tick barrier, and its in-flight call dies with "SSE
+        # stream ended without a response". Under the old world the commons
+        # never actually died, so this never fired; it now does, and an
+        # unhandled transport error here would abort a paid run at the exact
+        # moment the interesting thing happened.
+        try:
+            res = await self.session.call_tool(tool, args)
+        except MCPError as exc:
+            return {"error": f"transport closed during {tool}: {exc}"}
         for block in res.content:
             text = getattr(block, "text", None)
             if text:
@@ -499,7 +509,7 @@ def main(argv=None) -> int:
     p.add_argument("--table", nargs=4, default=dispositions.DEFAULT_TABLE,
                    help="which four dispositions sit at the table")
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--r", type=float, default=0.05)
+    p.add_argument("--r", type=float, default=0.15)
     p.add_argument("--monitoring", choices=["none", "local", "global"], default="global")
     p.add_argument("--punish", action="store_true")
     p.add_argument("--no-chat", action="store_true")

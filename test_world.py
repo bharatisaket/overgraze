@@ -20,6 +20,15 @@ import harness
 
 
 def st(kinds=("greedy", "greedy"), seed=0, rule="global", r=0.15, **ab):
+    """A world for testing one mechanic at a time.
+
+    Upkeep is off unless a test asks for it. These tests assert exact scores
+    after a harvest or a punishment, and a per-tick living cost would offset
+    every one of those numbers by the same amount while telling you nothing
+    about the mechanic under test -- the assertions would still pass and would
+    no longer mean what their names say. Upkeep has its own tests below.
+    """
+    ab.setdefault("upkeep", 0.0)
     return initial_state(seed, list(kinds), rule=rule, r=r, **ab)
 
 
@@ -120,7 +129,7 @@ class TestSameCellSameTick(unittest.TestCase):
         self.assertTrue(any(e["contested"] for e in ev if e["type"] == "cell"))
 
     def test_separate_cells_are_not_contested(self):
-        s = at(at(st(("greedy", "greedy")), 0, 1, 1), 1, 4, 4)
+        s = at(at(st(("greedy", "greedy")), 0, 1, 1), 1, 3, 3)
         _, ev = apply_actions(s, [Action(0, "harvest", amount=TAKE),
                                   Action(1, "harvest", amount=TAKE)])
         cells = [e for e in ev if e["type"] == "cell"]
@@ -277,7 +286,7 @@ class TestSpeech(unittest.TestCase):
 
     def test_message_is_not_heard_out_of_range(self):
         # speech is grid-wide by default, so range has to be set to test it
-        s = at(at(st(("greedy", "greedy"), speech_radius=1), 0, 0, 0), 1, 5, 5)
+        s = at(at(st(("greedy", "greedy"), speech_radius=1), 0, 0, 0), 1, 3, 3)
         s1, ev = apply_actions(s, [Action(0, "say", text="hello")])
         self.assertEqual([e["heard_by"] for e in ev if e["type"] == "speech"], [[]])
         self.assertEqual(listen(s1, 1), [])
@@ -314,20 +323,20 @@ class TestSpeechReach(unittest.TestCase):
     """Speech is grid-wide by default; range is a per-run switch."""
 
     def test_broadcast_reaches_the_far_corner(self):
-        s = at(at(st(("greedy", "greedy")), 0, 0, 0), 1, 5, 5)
+        s = at(at(st(("greedy", "greedy")), 0, 0, 0), 1, 3, 3)
         s1, ev = apply_actions(s, [Action(0, "say", text="lets stop at a third")])
         self.assertEqual([e["heard_by"] for e in ev if e["type"] == "speech"], [[1]])
         self.assertEqual(listen(s1, 1)[0]["text"], "lets stop at a third")
 
     def test_radius_limits_reach_when_set(self):
-        s = at(at(st(("greedy", "greedy"), speech_radius=1), 0, 0, 0), 1, 5, 5)
+        s = at(at(st(("greedy", "greedy"), speech_radius=1), 0, 0, 0), 1, 3, 3)
         s1, ev = apply_actions(s, [Action(0, "say", text="too far")])
         self.assertEqual([e["heard_by"] for e in ev if e["type"] == "speech"], [[]])
         self.assertEqual(listen(s1, 1), [])
 
     def test_listening_is_fixed_at_speaking_time_not_current_position(self):
         """Walking to where a conversation happened must not reveal it."""
-        s = at(at(st(("greedy", "greedy"), speech_radius=1), 0, 0, 0), 1, 5, 5)
+        s = at(at(st(("greedy", "greedy"), speech_radius=1), 0, 0, 0), 1, 3, 3)
         s1, _ = apply_actions(s, [Action(0, "say", text="a secret")])
         self.assertEqual(listen(s1, 1), [])
         walked = at(s1, 1, 0, 1)              # agent 1 walks right next door
@@ -358,12 +367,12 @@ class TestLedger(unittest.TestCase):
         self.assertEqual([r["agent"] for r in rows], [1])
 
     def test_local_monitoring_hides_the_far_side_of_the_map(self):
-        s = at(at(st(("greedy", "greedy"), monitoring="local"), 0, 0, 0), 1, 5, 5)
+        s = at(at(st(("greedy", "greedy"), monitoring="local"), 0, 0, 0), 1, 3, 3)
         s1, _ = apply_actions(s, [Action(1, "harvest", amount=TAKE)])
         self.assertEqual(ledger(s1, 0)["witnessed"], [])
 
     def test_global_monitoring_sees_everything_and_scores(self):
-        s = at(at(st(("greedy", "greedy"), monitoring="global"), 0, 0, 0), 1, 5, 5)
+        s = at(at(st(("greedy", "greedy"), monitoring="global"), 0, 0, 0), 1, 3, 3)
         s1, _ = apply_actions(s, [Action(1, "harvest", amount=TAKE)])
         led = ledger(s1, 0)
         self.assertEqual([r["agent"] for r in led["witnessed"]], [1])
@@ -376,10 +385,10 @@ class TestLedger(unittest.TestCase):
 
     def test_witnesses_are_fixed_at_action_time(self):
         """Walking to where a harvest happened must not reveal it afterwards."""
-        s = at(at(st(("greedy", "greedy"), monitoring="local"), 0, 0, 0), 1, 5, 5)
+        s = at(at(st(("greedy", "greedy"), monitoring="local"), 0, 0, 0), 1, 3, 3)
         s1, _ = apply_actions(s, [Action(1, "harvest", amount=TAKE)])
         self.assertEqual(ledger(s1, 0)["witnessed"], [])
-        walked = at(s1, 0, 5, 4)                 # agent 0 walks over later
+        walked = at(s1, 0, 3, 2)                 # agent 0 walks over later
         self.assertEqual(ledger(walked, 0)["witnessed"], [],
                          "monitoring leaked backwards in time")
 
@@ -525,7 +534,7 @@ class TestVision(unittest.TestCase):
         self.assertEqual(len(look(s, 0)["cells"]), 4)        # corner sees 2x2
 
     def test_look_reports_nearby_agents_only(self):
-        s = at(at(st(("greedy", "greedy")), 0, 2, 2), 1, 5, 5)
+        s = at(at(st(("greedy", "greedy")), 0, 2, 2), 1, 0, 0)
         self.assertEqual(look(s, 0)["agents"], [])
         s2 = at(s, 1, 2, 3)
         self.assertEqual(len(look(s2, 0)["agents"]), 1)
@@ -558,7 +567,7 @@ class TestPunish(unittest.TestCase):
         self.assertTrue([e for e in ev if e["type"] == "punish"])
 
     def test_cannot_punish_out_of_range(self):
-        s = at(at(st(("greedy", "greedy"), punish=True), 0, 0, 0), 1, 5, 5)
+        s = at(at(st(("greedy", "greedy"), punish=True), 0, 0, 0), 1, 3, 3)
         _, ev = apply_actions(s, [Action(0, "punish", subject=1)])
         self.assertTrue(any(e["reason"] == "that agent is out of range"
                             for e in ev if e["type"] == "reject"))
@@ -679,6 +688,47 @@ class TestWorldInvariants(unittest.TestCase):
         ts = [e["t"] for e in ep.events]
         self.assertEqual(ts, sorted(ts), "event log is not in tick order")
 
+
+
+class TestUpkeep(unittest.TestCase):
+    """The per-tick cost of existing.
+
+    Without it the measured equilibrium was agents holding the field near
+    capacity and harvesting a fraction of what they were allowed -- restraint
+    was free, so they took the free option. Upkeep is what makes standing still
+    a losing move and turns the question from whether to harvest into how much.
+    """
+
+    def test_doing_nothing_costs_you(self):
+        s = initial_state(0, ["a"], r=0.15, upkeep=0.08)
+        s1, _ = apply_actions(s, [Action(0, "noop")])
+        self.assertAlmostEqual(s1.agents[0].score, -0.08)
+
+    def test_it_is_charged_on_top_of_a_harvest(self):
+        s = initial_state(0, ["a"], r=0.15, upkeep=0.08)
+        s1, _ = apply_actions(s, [Action(0, "harvest", amount=0.5)])
+        self.assertAlmostEqual(s1.agents[0].score, 0.42)
+
+    def test_every_agent_pays_it_whatever_they_did(self):
+        s = initial_state(0, ["a", "b", "c"], r=0.15, upkeep=0.08)
+        s1, _ = apply_actions(s, [Action(0, "harvest", amount=0.2),
+                                  Action(1, "move", direction="stay"),
+                                  Action(2, "noop")])
+        paid = [round(before.score - after.score + granted, 10)
+                for before, after, granted in
+                zip(s.agents, s1.agents, [0.2, 0.0, 0.0])]
+        self.assertEqual(paid, [0.08, 0.08, 0.08])
+
+    def test_zero_upkeep_reproduces_the_old_world(self):
+        s = initial_state(0, ["a"], r=0.15, upkeep=0.0)
+        s1, _ = apply_actions(s, [Action(0, "noop")])
+        self.assertEqual(s1.agents[0].score, 0.0)
+
+    def test_it_accumulates_over_ticks(self):
+        s = initial_state(0, ["a"], r=0.15, upkeep=0.08)
+        for _ in range(5):
+            s, _ = apply_actions(s, [Action(0, "noop")])
+        self.assertAlmostEqual(s.agents[0].score, -0.40)
 
 if __name__ == "__main__":
     unittest.main()

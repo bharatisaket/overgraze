@@ -229,14 +229,14 @@ MIXES = {
 # Regrowth rates the visualiser sweeps, chosen from `--sweep`: 0.02-0.10 is the
 # band where greedy collapses the commons and cautious survives it, and 0.15
 # sits past the crossover so the charts show both sides of the line.
-SWEEP_R = [0.02, 0.03, 0.05, 0.08, 0.12]
+SWEEP_R = [0.08, 0.11, 0.15, 0.20, 0.26]
 SEEDS = 40
 
 # Tuned with `--dilemma`, not by eye. At this rate the world satisfies all four
 # conditions the experiment needs: defection dominates, mutual cooperation beats
 # mutual defection ~1.8x, welfare falls with every extra defector, and half the
 # group defecting usually destroys the commons -- so free-riding is not safe.
-TUNED_R = 0.05
+TUNED_R = 0.15
 
 
 @dataclass
@@ -398,6 +398,21 @@ def cmd_dilemma(args) -> int:
     R = rows[0]["welfare"] / 4     # reward: everyone cooperates
     P = rows[4]["welfare"] / 4     # punishment: everyone defects
     S = rows[1]["cooperator"]      # sucker: cooperate while someone defects
+
+    # Write the payoffs next to the world they were measured in, so theory.py
+    # reads them instead of carrying a literal. They were a literal once, copied
+    # from a run of this command, and they silently survived a change of grid
+    # size, regrowth rate and the introduction of upkeep -- still printed as
+    # "measured" while describing a world that no longer existed.
+    import json as _json
+    from pathlib import Path
+    from world import CAPACITY as _CAP, N as _N, UPKEEP as _UP
+    _json.dump({"T": T, "R": R, "P": P, "S": S,
+                "measured_in": {"N": _N, "capacity": _CAP, "r": args.r,
+                                "upkeep": _UP, "rule": args.rule,
+                                "seeds": args.runs}},
+               open(Path(__file__).with_name("payoffs.json"), "w",
+                    encoding="utf-8"), indent=2)
     checks = [
         ("payoff ordering T>R>P>S", T > R > P > S,
          f"T={T:.1f} R={R:.1f} P={P:.1f} S={S:.1f}"),

@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from world import (Action, Agent, Message, State, TICKS, apply_actions,
+from world import (Action, Agent, Message, State, TICKS, UPKEEP, apply_actions,
                    initial_state)
 
 BARRIER_TIMEOUT = 30.0     # seconds before absent agents are recorded as noop
@@ -132,6 +132,7 @@ def encode_state(s: State) -> str:
         "vision": s.vision, "speech_radius": s.speech_radius,
         "share_stock": s.share_stock, "monitoring": s.monitoring,
         "noise": s.noise, "misreport": s.misreport,
+        "upkeep": s.upkeep,
     })
 
 
@@ -152,6 +153,11 @@ def decode_state(blob: str) -> State:
         vision=d["vision"], speech_radius=d["speech_radius"],
         share_stock=d["share_stock"], monitoring=d["monitoring"],
         noise=d["noise"], misreport=d["misreport"],
+        # Falls back to the module default only for runs recorded before upkeep
+        # existed. Every switch has to survive the round trip through SQLite --
+        # a field missing here does not fail, it silently reverts to the default
+        # on the next tick, and the run stops being the run that was configured.
+        upkeep=d.get("upkeep", UPKEEP),
     )
 
 

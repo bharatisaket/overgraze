@@ -40,7 +40,7 @@ class TestStateCodec(TempDB):
         self.assertEqual((back.rule, back.r, back.monitoring), ("neighbour", 0.07, "global"))
 
     def test_a_played_state_round_trips_including_logs(self):
-        s = initial_state(0, ["a", "b"], r=0.05, monitoring="global")
+        s = initial_state(0, ["a", "b"], r=0.15, monitoring="global", upkeep=0.0)
         s, _ = apply_actions(s, [Action(0, "harvest", amount=0.4),
                                  Action(0, "say", text="mine"),
                                  Action(1, "plant")])
@@ -74,7 +74,7 @@ class TestRunsAndTokens(TempDB):
 
     def test_state_survives_a_fresh_connection(self):
         """Nothing lives in a session -- a new process must see the same world."""
-        info = store.create_run(self.con, ["a", "b"], r=0.05)
+        info = store.create_run(self.con, ["a", "b"], r=0.15, upkeep=0.0)
         s = store.load_state(self.con, info["run_id"])
         s, _ = apply_actions(s, [Action(0, "harvest", amount=0.5)])
         store.save_state(self.con, info["run_id"], s)
@@ -91,7 +91,7 @@ class TestRunsAndTokens(TempDB):
 class TestIntents(TempDB):
     def setUp(self):
         super().setUp()
-        self.info = store.create_run(self.con, ["a", "b"], r=0.05)
+        self.info = store.create_run(self.con, ["a", "b"], r=0.15, upkeep=0.0)
         self.run = self.info["run_id"]
 
     def test_a_second_physical_action_is_refused(self):
@@ -135,7 +135,7 @@ class TestBarrier(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.con = store.connect(Path(self.dir.name) / "t.db")
-        self.info = store.create_run(self.con, ["a", "b"], r=0.05, monitoring="global")
+        self.info = store.create_run(self.con, ["a", "b"], r=0.15, monitoring="global", upkeep=0.0)
         self.run = self.info["run_id"]
 
     def tearDown(self):
@@ -196,3 +196,26 @@ class TestBarrier(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUpkeepSurvivesStorage(unittest.TestCase):
+    """A switch that does not round-trip is a switch that does not exist.
+
+    encode_state/decode_state name every field explicitly, so one left out of
+    decode does not raise -- it silently falls back to the module default on the
+    next load, and a run configured one way carries on being a different run.
+    """
+
+    def setUp(self):
+        self.con = store.connect(":memory:")
+
+    def tearDown(self):
+        self.con.close()
+
+    def test_upkeep_round_trips_through_sqlite(self):
+        info = store.create_run(self.con, ["a", "b"], r=0.15, upkeep=0.031)
+        self.assertAlmostEqual(store.load_state(self.con, info["run_id"]).upkeep, 0.031)
+
+    def test_zero_upkeep_is_not_mistaken_for_absent(self):
+        info = store.create_run(self.con, ["a", "b"], r=0.15, upkeep=0.0)
+        self.assertEqual(store.load_state(self.con, info["run_id"]).upkeep, 0.0)

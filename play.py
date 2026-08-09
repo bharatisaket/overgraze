@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import sys
 import httpx2
 
 from mcp import ClientSession
+from mcp.shared.exceptions import MCPError
 from mcp.client.streamable_http import streamable_http_client
 
 URL = "http://127.0.0.1:8000/mcp"
@@ -57,20 +59,39 @@ class Forager:
                     await session.initialize()
                     if opener:
                         await self.call("say", message=opener)
+                    last_good: dict = {}
                     for _ in range(max_ticks):
                         out = await self.take_turn()
-                        if out.get("done") or out.get("resolved") is False:
+                        if (out.get("done") or out.get("error")
+                                or out.get("resolved") is False):
                             break
                         self.ticks += 1
+                        last_good = out
                         if report:
                             report(self, out)
                         if out.get("collapsed"):
                             break
-                    self.final = await self.call("get_status")
+                    # Asking for a status after the run has ended returns an
+                    # error shape, and overwriting the result with it threw away
+                    # everything the run had done -- the summary reported tick
+                    # "?", zero commons and zero scores for a run that had just
+                    # played 27 ticks and destroyed the pasture. The last live
+                    # reading is the answer; a dead one is not an update.
+                    final = await self.call("get_status")
+                    self.final = final if "rules" in final else last_good
                     return self.final
 
     async def call(self, tool: str, **args) -> dict:
-        res = await self.session.call_tool(tool, args)
+        # A collapsing run tears the transport down underneath whoever is still
+        # waiting on the tick barrier: the run ends, sessions terminate, and the
+        # in-flight call dies with "SSE stream ended without a response". That is
+        # the end of the run arriving out of order, not a failure, so it is
+        # reported as a status the caller can act on. Returning a dict without
+        # "rules" is what every loop here already treats as "stop".
+        try:
+            res = await self.session.call_tool(tool, args)
+        except MCPError as exc:
+            return {"error": f"transport closed during {tool}: {exc}"}
         for block in res.content:
             text = getattr(block, "text", None)
             if text:
@@ -83,6 +104,14 @@ class Forager:
     async def take_turn(self) -> dict:
         """status -> look -> listen -> decide -> act, the loop from the plan."""
         st = await self.call("get_status")
+        # Anything that is not a live status ends this forager's run. Checking
+        # only `collapsed` and `ticks_remaining` was not enough: once the run
+        # finishes the server answers with an error shape, which has neither
+        # field, passes both guards, and then dies on st["rules"]. Under the old
+        # gentler world the commons never actually died during a self-test, so
+        # this path was never reached.
+        if "rules" not in st:
+            return {"done": True, "why": st.get("error", "run is over")}
         if st.get("collapsed") or st.get("ticks_remaining", 1) <= 0:
             return {"done": True}
         view = await self.call("look_around")
@@ -146,7 +175,7 @@ async def self_test(port: int) -> int:
 
     con = store.connect()
     info = store.create_run(con, ["alice", "bob", "carol", "dave"],
-                            seed=0, r=0.05, monitoring="global", punish=True)
+                            seed=0, r=0.15, monitoring="global", punish=True)
     print(f"created run {info['run_id']}\n")
 
     task = asyncio.create_task(
@@ -161,7 +190,14 @@ async def self_test(port: int) -> int:
         print("\nGATE:", "PASS -- a full run was driven over MCP" if ok else "FAIL")
         return 0 if ok else 1
     finally:
+        # Cancelling is not enough: the CancelledError escapes the event loop,
+        # asyncio.run re-raises it, and the process exits non-zero after the
+        # gate has already printed PASS and returned 0. CI would read that as a
+        # failed gate. Awaiting the cancellation is what actually retires the
+        # server task, and it takes the uvicorn lifespan traceback with it.
         task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 def main(argv=None) -> int:
