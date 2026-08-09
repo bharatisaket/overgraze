@@ -396,8 +396,15 @@ class Agent:
         return await self.call("pass_turn")
 
     async def play(self, client, ticks: int) -> None:
+        # A generous connect timeout, and retries, because the failure it
+        # prevents is expensive. Four agents open connections within
+        # milliseconds of each other against a server that started two seconds
+        # ago; one ConnectTimeout kills the whole run, and a run is real money.
+        # A 65-tick run died at tick 14 this way, $0.64 for nothing.
         async with httpx2.AsyncClient(
-                headers={"Authorization": f"Bearer {self.token}"}, timeout=120.0) as http:
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=httpx2.Timeout(120.0, connect=30.0),
+                transport=httpx2.AsyncHTTPTransport(retries=3)) as http:
             async with streamable_http_client(self.url, http_client=http) as streams:
                 async with ClientSession(streams[0], streams[1]) as session:
                     self.session = session
@@ -506,7 +513,7 @@ async def run(args) -> int:
         print(f"thinking={think} effort="
               f"{shape.get('output_config', {}).get('effort', 'n/a')}\n")
 
-    agents = [Agent(name=n, disposition=("uniform" if args.uniform else n),
+    agents = [Agent(name=n, disposition=(args.objective if args.uniform else n),
                     token=t,
                     url=f"http://127.0.0.1:{args.port}/mcp",
                     model=args.model, effort=args.effort, budget=budget,
@@ -517,7 +524,7 @@ async def run(args) -> int:
     # much the model deliberates per tick, so runs are only comparable within it.
     trace.write({"type": "run", "run_id": info["run_id"], "seats": seats,
                  "model": args.model, "effort": args.effort, "seed": args.seed,
-                 "uniform": args.uniform,
+                 "uniform": args.uniform, "objective": args.objective,
                  "thinking": shape.get("thinking"),
                  "horizon": args.horizon, "ticks": args.ticks,
                  "r": args.r, "monitoring": args.monitoring,
@@ -549,6 +556,11 @@ async def run(args) -> int:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="run language-model foragers")
     p.add_argument("--model", default=DEFAULT_MODEL)
+    p.add_argument("--objective", choices=["total", "rank"], default="total",
+                   help="what a seat is scored on under --uniform. total: "
+                        "your own harvest, under which punishing another "
+                        "forager can never pay. rank: finishing above the "
+                        "others, under which it can")
     p.add_argument("--uniform", action="store_true",
                    help="give all four seats the same prompt. Divergence "
                         "then comes from the run and not the briefing, "
