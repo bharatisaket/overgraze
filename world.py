@@ -70,6 +70,20 @@ SAY_LIMIT = 140    # characters
 PUNISH_COST = 0.2  # score the punisher forfeits
 PUNISH_FINE = 0.6  # score the punished loses
 
+# Graduated sanctions. Fining someone who broke a pact they signed is cheaper to
+# do and hurts more than fining someone who simply took a lot, because breaking
+# a promise is a different act from never making one.
+#
+# Without this a pact is strictly irrational to join. Punishment already reaches
+# anyone there is evidence against, member or not, so signing bought nothing at
+# all: it added an obligation you could be caught violating, with no protection,
+# no access and no reward. A rational agent would never have joined one. Now a
+# pact converts diffuse, expensive policing into cheap, targeted policing, and
+# what members trade for that is a heavier penalty when they defect.
+BREACH_PUNISH_COST = 0.1   # half price to sanction a promise-breaker
+BREACH_PUNISH_FINE = 1.2   # twice the sting
+BREACH_WINDOW = 8          # ticks a breach stays punishable at the higher rate
+
 # What it costs to exist for one tick, charged to every agent whatever it does.
 #
 # Without this, restraint is free and the measured equilibrium was absurd: agents
@@ -472,6 +486,23 @@ def history(state: State, agent_id: int, window: int = 12) -> dict:
 
 
 PUNISH_MEMORY = 6      # ticks a witnessed act stays actionable
+BREACH_MEMORY = 8      # ticks a witnessed breach stays visible in get_pacts
+
+
+def recently_broke_a_pact(state: State, agent_id: int) -> bool:
+    """Did this agent take more than a pact it had signed allowed, lately?
+
+    Judged against the terms in force at the time, over a short window, so a
+    promise broken twenty ticks ago is not still doubling every fine.
+    """
+    recent = state.tick - BREACH_WINDOW
+    for t, aid, kind, granted, cell, before, after, witnesses in state.action_log:
+        if t < recent or aid != agent_id or kind != "harvest":
+            continue
+        for p in state.pacts:
+            if agent_id in p.members and granted > p.max_take + 1e-9:
+                return True
+    return False
 
 
 def can_punish(state: State, punisher: int, target: int,
@@ -517,6 +548,23 @@ def pacts_view(state: State, agent_id: int) -> dict:
     makes an accusation worth something, and what makes lying about one
     possible.
     """
+    # Breaches this agent was near enough to witness. Without these an agent
+    # has no way to know a pact was ever broken -- and in the first real run
+    # nobody punished anybody, which read like a finding about enforcement and
+    # was actually this: the information required to enforce was never sent.
+    seen = []
+    if state.monitoring != "none":
+        recent = state.tick - BREACH_MEMORY
+        for t, aid, kind, granted, cell, before, after, witnesses in state.action_log:
+            if t < recent or aid == agent_id or kind != "harvest":
+                continue
+            if state.monitoring != "global" and agent_id not in witnesses:
+                continue
+            for p in state.pacts:
+                if aid in p.members and granted > p.max_take + 1e-9:
+                    seen.append({"tick": t, "agent": aid, "pact": p.id,
+                                 "agreed": p.max_take, "took": round(granted, 3)})
+
     out = []
     for p in state.pacts:
         out.append({
@@ -528,7 +576,8 @@ def pacts_view(state: State, agent_id: int) -> dict:
             "open": p.live,
         })
     return {"pacts": out,
-            "yours": [p.id for p in state.pacts if p.live and agent_id in p.members]}
+            "yours": [p.id for p in state.pacts if p.live and agent_id in p.members],
+            "breaches_you_saw": seen}
 
 
 def status(state: State, agent_id: int) -> dict:
@@ -799,11 +848,14 @@ def apply_actions(state: State, actions: Iterable[Action]) -> tuple[State, list[
     # 4. punishment -- costs the punisher, costs the punished more
     for aid, act in resource.items():
         if act.kind == "punish":
-            deltas[aid] -= PUNISH_COST
-            deltas[act.subject] -= PUNISH_FINE
+            broke = recently_broke_a_pact(state, act.subject)
+            cost = BREACH_PUNISH_COST if broke else PUNISH_COST
+            fine = BREACH_PUNISH_FINE if broke else PUNISH_FINE
+            deltas[aid] -= cost
+            deltas[act.subject] -= fine
             events.append({"t": state.tick, "type": "punish", "agent": aid,
-                           "subject": act.subject, "cost": PUNISH_COST,
-                           "fine": PUNISH_FINE})
+                           "subject": act.subject, "cost": cost, "fine": fine,
+                           "for_breaking_a_pact": broke})
 
     for aid in sorted(resource):
         events.append({"t": state.tick, "type": "action", "agent": aid,

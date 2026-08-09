@@ -163,7 +163,8 @@ async def plant(ctx: Context) -> dict:
     return await act(ctx, "plant")
 
 
-@mcp.tool(description="Fine another forager. It costs you too, and only works in range.")
+@mcp.tool(description="Fine another forager. It costs you too, and needs you to have seen "
+                      "them act or be standing near them.")
 async def punish(ctx: Context, agent_id: int) -> dict:
     return await act(ctx, "punish", subject=int(agent_id))
 
@@ -223,7 +224,8 @@ async def leave_pact(ctx: Context, pact_id: int) -> dict:
     return await _pact_intent(ctx, "leave_pact", subject=pact_id)
 
 
-@mcp.tool(description="Every pact, its agreed cap and who has signed it. Free to read.")
+@mcp.tool(description="Every pact, its agreed cap, who has signed it, and any breach "
+                      "you witnessed. Free to read.")
 async def get_pacts(ctx: Context) -> dict:
     who, err = whoami(ctx)
     if err:

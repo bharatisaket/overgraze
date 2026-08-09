@@ -121,18 +121,16 @@ amount, "stay" for direction, -1 for target_agent, and "" for say.
 say is spoken aloud to every other forager and does not use up your action. \
 Leave it "" to stay silent.
 
-pact_action is separate from your action and also free, so you may negotiate \
-and still harvest in the same turn.
-  none     -> do nothing about pacts this turn
-  propose  -> set pact_cap: offer a public agreement that members take no more \
-than that per turn. You become its first member.
-  accept   -> set pact_id: join that pact and its cap
+pact_action is separate from your action and does not use it up.
+  none     -> no pact activity this turn
+  propose  -> set pact_cap: a public cap per turn; you become its first member
+  accept   -> set pact_id: join that pact
   leave    -> set pact_id: leave that pact
 
-A pact binds nobody. You may take more than you agreed to, and you may leave at \
-any time. Anything you harvest this turn is still judged against a pact you \
-leave this turn. Breaking one is recorded and may be seen by whoever is nearby. \
-Send "none" and pact_id -1 and pact_cap 0 when you are not using this.
+A pact binds nobody. You may take more than you agreed and may leave at any \
+time; what you harvest this turn is judged against a pact you leave this turn. \
+Breaking one is recorded and may be seen by whoever is nearby. Default to \
+"none" with pact_id -1 and pact_cap 0.
 
 note_to_self is carried into your next turn and nobody else sees it. Use it for \
 what you have noticed and what you have promised. Leave it "" to keep the note \
