@@ -12,7 +12,8 @@ import unittest
 
 import numpy as np
 
-from world import (CAP, CAPACITY, COLLAPSE_FLOOR, N, PLANT, PUNISH_COST, Pact,
+from world import (CAP, CAPACITY, COLLAPSE_FLOOR, N, PLANT, PUNISH_COST,
+                   PUNISH_MEMORY, Pact,
                    pacts_view,
                    PUNISH_FINE, SAY_LIMIT, TAKE, TICKS, Action, apply_actions,
                    history, initial_state, ledger, listen, look, neighbours_mean,
@@ -576,10 +577,12 @@ class TestPunish(unittest.TestCase):
         self.assertAlmostEqual(s1.agents[1].score, -PUNISH_FINE)
         self.assertTrue([e for e in ev if e["type"] == "punish"])
 
-    def test_cannot_punish_out_of_range(self):
-        s = at(at(st(("greedy", "greedy"), punish=True), 0, 0, 0), 1, 3, 3)
+    def test_cannot_punish_someone_you_have_no_evidence_about(self):
+        """Reach follows evidence now, not adjacency -- see TestPunishReach."""
+        s = at(at(st(("greedy", "greedy"), punish=True, monitoring="local"),
+                  0, 0, 0), 1, 3, 3)
         _, ev = apply_actions(s, [Action(0, "punish", subject=1)])
-        self.assertTrue(any(e["reason"] == "that agent is out of range"
+        self.assertTrue(any("neither seen nor witnessed" in e["reason"]
                             for e in ev if e["type"] == "reject"))
 
     def test_cannot_punish_yourself_or_a_stranger(self):
@@ -893,6 +896,63 @@ class TestSurvivableCollapse(unittest.TestCase):
         for _ in range(6):
             s, _ = apply_actions(s, [Action(0, "noop")])
         self.assertLessEqual(float(s.grid.sum()), CAPACITY + 1e-6)
+
+
+class TestPunishReach(unittest.TestCase):
+    """Enforcement follows evidence, not current adjacency.
+
+    Adjacency alone made punishment unusable rather than costly: in a real run
+    agents attempted it nine times and every attempt was refused for range,
+    because a defector is almost never standing beside you at the moment you
+    act on what it did.
+    """
+
+    def _apart(self, **ab):
+        s = st(("a", "b"), punish=True, **ab)
+        return at(at(s, 0, 0, 0), 1, 3, 3)          # far apart
+
+    def test_adjacent_still_works(self):
+        s = st(("a", "b"), punish=True)
+        s = at(at(s, 0, 1, 1), 1, 1, 2)
+        _, ev = apply_actions(s, [Action(0, "punish", subject=1)])
+        self.assertTrue([e for e in ev if e["type"] == "punish"])
+
+    def test_a_stranger_you_never_saw_cannot_be_punished(self):
+        s = self._apart(monitoring="local")
+        _, ev = apply_actions(s, [Action(0, "punish", subject=1)])
+        self.assertTrue(any("neither seen nor witnessed" in e["reason"]
+                            for e in ev if e["type"] == "reject"))
+
+    def test_global_monitoring_lets_you_punish_at_any_distance(self):
+        """Everyone witnesses everything, so enforcement is not range-limited."""
+        s = self._apart(monitoring="global")
+        s1, _ = apply_actions(s, [Action(1, "harvest", amount=TAKE)])
+        s1 = at(at(s1, 0, 0, 0), 1, 3, 3)
+        _, ev = apply_actions(s1, [Action(0, "punish", subject=1)])
+        self.assertTrue([e for e in ev if e["type"] == "punish"],
+                        "global monitoring should make any defector reachable")
+
+    def test_you_can_punish_someone_who_has_since_walked_away(self):
+        """Witnessed it, then they moved off. The evidence still stands."""
+        s = st(("a", "b"), punish=True, monitoring="local")
+        s = at(at(s, 0, 1, 1), 1, 1, 2)                  # adjacent: 0 witnesses 1
+        s1, _ = apply_actions(s, [Action(1, "harvest", amount=TAKE)])
+        far = at(s1, 1, 3, 3)                            # 1 walks to the far corner
+        _, ev = apply_actions(far, [Action(0, "punish", subject=1)])
+        self.assertTrue([e for e in ev if e["type"] == "punish"],
+                        "a witnessed act stopped being actionable once they moved")
+
+    def test_evidence_goes_stale(self):
+        s = st(("a", "b"), punish=True, monitoring="local")
+        s = at(at(s, 0, 1, 1), 1, 1, 2)
+        s, _ = apply_actions(s, [Action(1, "harvest", amount=TAKE)])
+        s = at(s, 1, 3, 3)
+        for _ in range(PUNISH_MEMORY + 1):
+            s, _ = apply_actions(s, [Action(0, "noop"), Action(1, "noop")])
+        _, ev = apply_actions(s, [Action(0, "punish", subject=1)])
+        self.assertTrue(any("neither seen nor witnessed" in e["reason"]
+                            for e in ev if e["type"] == "reject"),
+                        "an act from long ago should not stay actionable for ever")
 
 if __name__ == "__main__":
     unittest.main()

@@ -484,7 +484,8 @@ async def run(args) -> int:
     seats = args.table
     info = store.create_run(con, seats, seed=args.seed, r=args.r,
                             monitoring=args.monitoring, punish=args.punish,
-                            chat=not args.no_chat)
+                            chat=not args.no_chat,
+                            end_on_collapse=args.end_on_collapse)
     print(f"run {info['run_id']}: {', '.join(seats)}")
     print(f"model={args.model} effort={args.effort} budget=${args.budget:.2f} "
           f"ticks={args.ticks}\n")
@@ -567,7 +568,13 @@ def main(argv=None) -> int:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--r", type=float, default=0.15)
     p.add_argument("--monitoring", choices=["none", "local", "global"], default="global")
-    p.add_argument("--punish", action="store_true")
+    p.add_argument("--punish", action="store_true", default=True)
+    p.add_argument("--end-on-collapse", action="store_true", default=False,
+                   dest="end_on_collapse",
+                   help="stop the run at the viability floor. Off by "
+                        "default: a collapse the agents live through is "
+                        "the only way greed leading to ruin and then to "
+                        "restraint can be seen inside one episode")
     p.add_argument("--no-chat", action="store_true")
     p.add_argument("--trace", default="traces.jsonl")
     p.add_argument("--port", type=int, default=8801)

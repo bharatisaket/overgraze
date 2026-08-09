@@ -450,6 +450,41 @@ def history(state: State, agent_id: int, window: int = 12) -> dict:
     return out
 
 
+PUNISH_MEMORY = 6      # ticks a witnessed act stays actionable
+
+
+def can_punish(state: State, punisher: int, target: int,
+               py: int, px: int, ty: int, tx: int) -> bool:
+    """May `punisher` fine `target` this tick?
+
+    Adjacency alone was the rule, and with vision 1 on a 4x4 board it made
+    enforcement impossible in practice rather than merely costly: across a real
+    run agents attempted to punish nine times and every attempt was refused for
+    range, because a defector is almost never standing next to you at the moment
+    you decide to act on what it did.
+
+    Evidence is the better test. You may fine someone you can see now, or
+    someone you *witnessed* acting within the last few ticks -- which is what
+    the ledger already records, and what an accusation is actually made of.
+
+    This is also what makes the monitoring switch bite. Under `global` everyone
+    witnesses everything, so anyone can sanction anyone and enforcement is easy.
+    Under `local` you can only punish what you were near enough to see, so
+    monitoring becomes the binding constraint on whether a norm can be enforced
+    at all -- which is the claim Ostrom's design principles actually make.
+    """
+    if max(abs(py - ty), abs(px - tx)) <= state.vision:
+        return True
+    if state.monitoring == "none":
+        return False
+    recent = state.tick - PUNISH_MEMORY
+    for t, aid, kind, granted, cell, before, after, witnesses in state.action_log:
+        if t >= recent and aid == target:
+            if state.monitoring == "global" or punisher in witnesses:
+                return True
+    return False
+
+
 def pacts_view(state: State, agent_id: int) -> dict:
     """Every pact, who is in it, and who has been seen breaking it.
 
@@ -673,8 +708,8 @@ def _validate(state: State, actions: Iterable[Action]):
                 reject(act, "no such agent to punish")
                 continue
             oy, ox = destination(other.id)
-            if max(abs(y - oy), abs(x - ox)) > state.vision:
-                reject(act, "that agent is out of range")
+            if not can_punish(state, act.agent_id, other.id, y, x, oy, ox):
+                reject(act, "you have neither seen nor witnessed that agent")
                 continue
         resource[act.agent_id] = act
 
