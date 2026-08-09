@@ -481,7 +481,11 @@ async def run(args) -> int:
     import store
 
     con = store.connect()
-    seats = args.table
+    # Seat names are labels, not instructions. Under --uniform every seat
+    # gets the identical prompt and they are numbered rather than named,
+    # so nothing downstream can read a disposition out of a name.
+    seats = ([f"seat_{i}" for i in range(4)] if args.uniform
+             else args.table)
     info = store.create_run(con, seats, seed=args.seed, r=args.r,
                             monitoring=args.monitoring, punish=args.punish,
                             chat=not args.no_chat,
@@ -504,7 +508,8 @@ async def run(args) -> int:
         print(f"thinking={think} effort="
               f"{shape.get('output_config', {}).get('effort', 'n/a')}\n")
 
-    agents = [Agent(name=n, disposition=n, token=t,
+    agents = [Agent(name=n, disposition=("uniform" if args.uniform else n),
+                    token=t,
                     url=f"http://127.0.0.1:{args.port}/mcp",
                     model=args.model, effort=args.effort, budget=budget,
                     trace=trace, shape=shape, horizon=args.horizon,
@@ -514,6 +519,7 @@ async def run(args) -> int:
     # much the model deliberates per tick, so runs are only comparable within it.
     trace.write({"type": "run", "run_id": info["run_id"], "seats": seats,
                  "model": args.model, "effort": args.effort, "seed": args.seed,
+                 "uniform": args.uniform,
                  "thinking": shape.get("thinking"),
                  "horizon": args.horizon, "ticks": args.ticks,
                  "r": args.r, "monitoring": args.monitoring,
@@ -545,6 +551,11 @@ async def run(args) -> int:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="run language-model foragers")
     p.add_argument("--model", default=DEFAULT_MODEL)
+    p.add_argument("--uniform", action="store_true",
+                   help="give all four seats the same prompt. Divergence "
+                        "then comes from the run and not the briefing, "
+                        "which is the only way a claim about roles can "
+                        "avoid being circular")
     p.add_argument("--horizon", choices=["true", "hidden", "world"],
                    default="true",
                    help="how much of the future agents see. true: ticks left "
