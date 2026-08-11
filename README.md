@@ -9,10 +9,6 @@ a pure function; the protocol layer is a thin shell over it.
 **Watch two real runs, side by side:**
 https://claude.ai/code/artifact/8c8f2ffa-6f4f-41ef-be73-d03469f86335
 
-**What building it taught me, written for product people:**
-[`docs/mcp-lessons.html`](docs/mcp-lessons.html) ·
-https://claude.ai/code/artifact/5bf0f4b9-7ac0-4928-973e-7d77dd8a04f6
-
 ---
 
 ## The finding
@@ -113,7 +109,6 @@ lies.py         statements the ledger contradicts
 demo_run.py     the real engine, scripted judgement, no API cost
 play.py         drives a full run over MCP. The Phase 2 gate
 results/        the four paid runs: traces, event logs, comparison
-docs/           the MCP write-up and the post
 ```
 
 ## Results

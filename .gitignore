@@ -25,3 +25,6 @@ traces.jsonl
 !results/
 !results/*.jsonl
 !results/*.db
+
+# private drafts, kept locally and out of the repo
+docs/
