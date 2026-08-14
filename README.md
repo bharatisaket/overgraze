@@ -9,6 +9,10 @@ a pure function; the protocol layer is a thin shell over it.
 **Watch two real runs, side by side:**
 https://claude.ai/code/artifact/8c8f2ffa-6f4f-41ef-be73-d03469f86335
 
+Built with Claude Code. I designed the experiments, chose the parameters and
+directed the work; the implementation is Claude's. The commit history reflects
+that, and most of what is in `NOTES.md` came out of arguing with it.
+
 ---
 
 ## The finding
